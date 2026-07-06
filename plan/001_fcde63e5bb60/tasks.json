@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Foundation & skills-dir location (PRD §8, build order step 1)",
-          "status": "Complete",
+          "status": "Ready",
           "description": "Establish the buildable Go skeleton (go.mod, .gitignore, LICENSE) and implement the single most failure-prone area: locating the skills/ dir via the §8 priority order (env var -> sibling-of-binary via os.Executable+EvalSymlinks -> walk-up-from-cwd). Prove it with a minimal `skpp --path` / `skpp --version`. PRD §13/§18 say do this first.",
           "tasks": [
             {
@@ -97,14 +97,14 @@
               "type": "Task",
               "id": "P1.M1.T3",
               "title": "main.go entrypoint — --path & --version (prove location resolution)",
-              "status": "Complete",
+              "status": "Ready",
               "description": "Create the main.go entrypoint with minimal arg parsing sufficient to prove skills-dir resolution end-to-end: `skpp --path` prints the resolved skills dir, `skpp --version` prints the version. Establishes the exit-code/stdout/stderr discipline and the version-injection ldflags pattern used by install.sh.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T3.S1",
                   "title": "main.go: arg-parse skeleton + --path + --version + exit codes",
-                  "status": "Complete",
+                  "status": "Ready",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T2.S3"
@@ -140,7 +140,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T4.S1",
                   "title": "Frontmatter/Skill types + ParseFrontmatter (yaml.v3, lenient)",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S1"
