@@ -1,0 +1,421 @@
+{
+  "backlog": [
+    {
+      "type": "Phase",
+      "id": "P1",
+      "title": "skpp v1.0 — Manifest-free skill path printer",
+      "status": "Researching",
+      "description": "One-shot build of the `skpp` Go CLI: resolves a human-friendly skill tag to the absolute filesystem path of a locally-stored Agent Skill, for consumption by `pi --skill <path>`. Manifest-free (disk-discovered), never in a pi auto-discovery location, loaded only via explicit `--skill`. Covers the full PRD: Go CLI (§6), discovery+resolution (§7), skills-dir location (§8), validation (§9), one example skill (§11), install.sh (§12), README (§15), and shell completions (§14). Build order follows PRD §18: skills-dir location first (hardest), then discovery, resolution, search/check, CLI polish, then packaging/docs. Research findings live in plan/001_fcde63e5bb60/architecture/.",
+      "milestones": [
+        {
+          "type": "Milestone",
+          "id": "P1.M1",
+          "title": "Foundation & skills-dir location (PRD §8, build order step 1)",
+          "status": "Planned",
+          "description": "Establish the buildable Go skeleton (go.mod, .gitignore, LICENSE) and implement the single most failure-prone area: locating the skills/ dir via the §8 priority order (env var -> sibling-of-binary via os.Executable+EvalSymlinks -> walk-up-from-cwd). Prove it with a minimal `skpp --path` / `skpp --version`. PRD §13/§18 say do this first.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M1.T1",
+              "title": "Repo & Go module scaffolding",
+              "status": "Planned",
+              "description": "Create the buildable project skeleton: go.mod (module github.com/dabstractor/skpp), .gitignore (PRD §16), and LICENSE (MIT, PRD §5/§19). This unblocks every subsequent Go package and the yaml.v3 dependency.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S1",
+                  "title": "go.mod, go.sum, .gitignore, LICENSE",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [],
+                  "prd_selectors": ["h2.4", "h2.15", "h2.18", "code.0"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/001_fcde63e5bb60/architecture/codebase_state.md — repo is greenfield (only PRD.md + .git). Go 1.26.4 toolchain present. Module path must be github.com/dabstractor/skpp.\n2. INPUT: None (first subtask). PRD.md is read-only reference.\n3. LOGIC: Create `go.mod` with `module github.com/dabstractor/skpp` and `go 1.25` directive (latest-two-stable policy; toolchain is 1.26.4 so 1.25 is safe). Add the single third-party dependency `gopkg.in/yaml.v3` via `go get` (produces go.sum). Create `.gitignore` with EXACTLY PRD §16 content: `/skpp`, `/dist`, `*.test`, `*.out`, `.DS_Store`. Create `LICENSE` as a standard MIT license text (PRD §19 decision 11 = MIT; mcpeepants has none but PRD requires it). Run `go build ./...` to confirm the module compiles (empty but valid). DO NOT create main.go or any internal/ package here — those are later subtasks.\n4. OUTPUT: A compilable Go module skeleton (go.mod, go.sum, .gitignore, LICENSE) that downstream subtasks build upon. `go build ./...` succeeds.\n5. DOCS: none — no user-facing/config/API surface change (LICENSE/.gitignore are repo hygiene, not documented)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T2",
+              "title": "internal/skillsdir — locate the skills dir (§8 priority order)",
+              "status": "Planned",
+              "description": "Implement the hardest, most failure-prone component: resolving the skills/ directory without a manifest. Priority order (first hit wins): (1) $SKPP_SKILLS_DIR env var, (2) sibling of the running binary via os.Executable()+EvalSymlinks(), (3) walk up from cwd to first ancestor with skills/ containing a SKILL.md, (4) error. Must be symlink-aware so symlink installs resolve back to the repo.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T2.S1",
+                  "title": "Package types + env-var resolution (rule 1)",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T1.S1"],
+                  "prd_selectors": ["h2.7", "h2.1"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/001_fcde63e5bb60/architecture/go_architecture.md (internal/skillsdir) for the agreed type shape. See verified_symlink_resolution.md for why EvalSymlinks stays (macOS needs it).\n2. INPUT: go.mod from P1.M1.T1.S1.\n3. LOGIC: Create `internal/skillsdir/skillsdir.go`. Define `type Source int` with constants `SourceEnv`, `SourceSibling`, `SourceWalkUp` (and a `String()` method returning a human label like \"SKPP_SKILLS_DIR\", \"sibling of binary\", \"ancestor of cwd\" for `skpp --path` reporting). Implement rule 1: read `os.Getenv(\"SKPP_SKILLS_DIR\")`; if set, `os.Stat` it; if it is an existing directory, return (absPath, SourceEnv, nil). Do NOT EvalSymlinks the env path (user points exactly where they want). Absolutize via `filepath.Abs`. If the env var is set but not a valid dir, fall through to rule 2 (do not hard-error on a bad env value — let later rules try). Mock/replace nothing; this is pure stdlib.\n4. OUTPUT: Package `skillsdir` with the `Source` type and an internal helper for rule 1, importable by the Find() combiner in P1.M1.T2.S3. Return signature target: the per-rule helpers feed `func Find() (dir string, src Source, err error)` built in S3.\n5. DOCS: none — internal package, no user-facing/config surface (SKPP_SKILLS_DIR env var is documented later in README, Mode B final task)."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T2.S2",
+                  "title": "Sibling-of-binary resolution (rule 2, symlink-aware)",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T2.S1"],
+                  "prd_selectors": ["h2.7", "h2.11", "h2.12"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: EMPIRICALLY VERIFIED in plan/001_fcde63e5bb60/architecture/verified_symlink_resolution.md — on Linux os.Executable() already returns the REAL path via /proc/self/exe even through cross-dir symlinks; EvalSymlinks is redundant on Linux but REQUIRED on macOS. Implement BOTH calls exactly; do not drop EvalSymlinks.\n2. INPUT: Source type / env-var helper from P1.M1.T2.S1.\n3. LOGIC: Implement rule 2: `exe, err := os.Executable()`; if err, skip rule. `real, err := filepath.EvalSymlinks(exe)`; if err, use `exe` as fallback. `repoDir := filepath.Dir(real)`. Candidate = `filepath.Join(repoDir, \"skills\")`. If `os.Stat(candidate)` is an existing dir, return (candidate, SourceSibling, nil). This is what makes `~/.local/bin/skpp -> ~/projects/skpp/skpp` resolve back to the repo. TEST: create a real binary in a temp dir with a sibling skills/ AND a symlink to that binary in a DIFFERENT temp dir; running the symlink must resolve Dir to the real binary's dir (mirror the verified_symlink_resolution.md test). Use `t.TempDir()` + `os.Symlink` in tests.\n4. OUTPUT: Internal helper for rule 2, consumed by Find() in P1.M1.T2.S3. Feeds the same (dir, Source, err) shape.\n5. DOCS: none — internal package; the symlink-install behavior is documented in README (Mode B final task)."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T2.S3",
+                  "title": "Walk-up-from-cwd resolution (rule 3) + Find() combiner",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T2.S2"],
+                  "prd_selectors": ["h2.7", "h2.12"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: Rule 3 exists for `go run` / dev use where the binary is in a temp dir and rules 1-2 fail. See go_architecture.md §8 priority order.\n2. INPUT: Rule 1 (env) and rule 2 (sibling) helpers from P1.M1.T2.S1/S2.\n3. LOGIC: Implement rule 3: start at `cwd, _ := os.Getwd()`; ascend via repeatedly replacing cwd with `filepath.Dir(cwd)` until reaching filesystem root; for each ancestor, if `<ancestor>/skills` exists AND contains at least one `SKILL.md` (use filepath.WalkDir to check, or filepath.Glob `skills/**/SKILL.md`), return (that skills dir, SourceWalkUp, nil). Then implement `func Find() (dir string, src Source, err error)` that tries rule 1 -> rule 2 -> rule 3 in order and returns the first hit. If all fail, return an error whose message includes the one-line fix from §8.4/§6.4: tell the user to set $SKPP_SKILLS_DIR, cd into the repo, or reinstall. The error text is user-facing (printed to stderr by main). TEST: temp dir tree with skills/foo/SKILL.md at various depths; chdir into a subdir and confirm walk-up finds it; confirm Find() returns SourceWalkUp.\n4. OUTPUT: `skillsdir.Find()` — the public entrypoint consumed by main.go (P1.M1.T3) and discover.Index (P1.M2.T5). Returns (absDir, Source, err).\n5. DOCS: none — internal package; resolution rules documented in README §7 section (Mode B final task)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T3",
+              "title": "main.go entrypoint — --path & --version (prove location resolution)",
+              "status": "Planned",
+              "description": "Create the main.go entrypoint with minimal arg parsing sufficient to prove skills-dir resolution end-to-end: `skpp --path` prints the resolved skills dir, `skpp --version` prints the version. Establishes the exit-code/stdout/stderr discipline and the version-injection ldflags pattern used by install.sh.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T3.S1",
+                  "title": "main.go: arg-parse skeleton + --path + --version + exit codes",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T2.S3"],
+                  "prd_selectors": ["h2.5", "h3.1", "h3.3", "h3.4", "h2.11"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See go_architecture.md (Exit codes) and (Output discipline). Version is injected at build time via `-ldflags \"-X main.version=...\"` (PRD §12.1 build command). Define `var version = \"dev\"` as a package var so ldflags can override it.\n2. INPUT: `skillsdir.Find()` from P1.M1.T2.S3 returning (absDir, Source, err).\n3. LOGIC: Create `main.go` (package main). Declare `var version = \"dev\"`. Implement a minimal manual arg parser (flag package is acceptable BUT note flags can appear in any order and long+short forms are needed; a small custom parser may be cleaner for the full §6 matrix — keep it extensible for M5). For THIS subtask handle ONLY: `--version`/`-v` (print `skpp <version>` + newline to stdout, exit 0); `--path`/`-p` (call skillsdir.Find; on success print absDir to stdout exit 0; on error print the Find() error to stderr + exit 1). `--version`/`--help` take precedence. Unknown flags are tolerated for now (full unknown-flag->exit-2 comes in P1.M5.T11). Acceptance gate: `test \"$(./skpp --path)\" = \"$PWD/skills\"` from PRD §13 (after skills/ exists — create a throwaway skills/.gitkeep to make the dir for now; the exact §13 assertion is re-run in P1.M6.T16). `./skpp --version` prints `skpp dev`.\n4. OUTPUT: A building `skpp` binary with working `--path` and `--version`. Establishes the arg-parser structure that M2-M5 extend. main.go exposes the dispatch point that later subtasks (T6 list, T8 resolve, T9 search, T10 check) plug into.\n5. DOCS: none yet — CLI surface is incomplete; README is written in Mode B final task after all flags exist."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M2",
+          "title": "Discovery & frontmatter parsing (PRD §7, build order step 2)",
+          "status": "Planned",
+          "description": "Implement the disk-discovery layer: parse SKILL.md YAML frontmatter (lenient, yaml.v3), extract skpp metadata conventions from the metadata map, walk the skills dir to build a sorted index of skills, and surface it via the `--list` human-readable catalog. This delivers the `skpp --list` command and the []Skill index that resolution (M3) and search/check (M4) consume.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M2.T4",
+              "title": "internal/discover — frontmatter model & parser (§7.3)",
+              "status": "Planned",
+              "description": "Define the frontmatter/Skill data model and the lenient frontmatter parser. Extracts the YAML block between the first two `---` lines, unmarshals with yaml.v3 (ignoring unknown keys), and pulls skpp conventions (keywords/category/aliases) out of the metadata map. Handles missing frontmatter gracefully (skill still resolves by directory).",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T4.S1",
+                  "title": "Frontmatter/Skill types + ParseFrontmatter (yaml.v3, lenient)",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T1.S1"],
+                  "prd_selectors": ["h2.6", "h3.7", "h2.2", "h2.9"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/001_fcde63e5bb60/architecture/external_deps.md §1-3 for the VERIFIED frontmatter schema (name 1-64 lowercase a-z0-9- no leading/trailing/consecutive hyphens; description max 1024; metadata arbitrary map; unknown keys ignored) and the recommended Go struct shape. yaml.v3 is the only third-party dep, already added in P1.M1.T1.S1.\n2. INPUT: go.mod with gopkg.in/yaml.v3 from P1.M1.T1.S1.\n3. LOGIC: Create `internal/discover/discover.go`. Define `type Frontmatter struct` with yaml tags: Name, Description, License, Compatibility, Metadata (map[string]any), AllowedTools (`allowed-tools`), DisableModelInvocation (`disable-model-invocation`). Do NOT call KnownFields(true) (lenient: ignore unknown keys — matches pi). Implement `func ParseFrontmatter(path string) (fm Frontmatter, body string, err error)`: read the file; if it does not start with a line that is exactly `---` (after trimming a leading BOM/newline), return empty Frontmatter with HasFM=false and NO error (skill still resolves by dir). Otherwise find the NEXT line that is exactly `---`; the text between is the YAML block (unmarshal into Frontmatter); the text after the closing `---` is the body. If no closing `---`, treat as no frontmatter (lenient). TEST: a SKILL.md with full frontmatter; one with no frontmatter; one with unknown keys (ignored); multiline folded/scalar description (yaml `>`); quoted values.\n4. OUTPUT: `discover.Frontmatter` type and `discover.ParseFrontmatter()`. Consumed by the Skill builder in P1.M2.T4.S2 and Index() in P1.M2.T5.\n5. DOCS: none — internal package."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T4.S2",
+                  "title": "metadata extraction (keywords/category/aliases) + Skill type",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M2.T4.S1"],
+                  "prd_selectors": ["h3.5", "h2.9", "h2.6"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See external_deps.md §1 — metadata is a spec'd arbitrary key-value map; nesting lists under it IS spec-compliant. keywords/aliases are skpp conventions read via type assertion on map[string]any values (yaml.v3 decodes lists as []any).\n2. INPUT: `discover.Frontmatter` (with Metadata map[string]any) from P1.M2.T4.S1.\n3. LOGIC: Define the public `type Skill struct` with fields: Dir (abs), RelTag (slash-normalized relative path), Name, Description, Keywords []string, Category string, Aliases []string, HasFM bool, SourceFile (abs SKILL.md path). Add a helper `func toStringSlice(v any) []string` that converts yaml-decoded `[]any` (each element typically interface{} holding a string) to []string; also accept a bare string (single value); nil/missing -> nil. Build a constructor `func newSkill(absDir, skillsDir string, fm Frontmatter, body string, hasFM bool) Skill` that computes RelTag via filepath.Rel then filepath.ToSlash, copies Name/Description, extracts Keywords=toStringSlice(Metadata[\"keywords\"]), Category=Metadata[\"category\"].(string), Aliases=toStringSlice(Metadata[\"aliases\"]). TEST: a frontmatter with metadata.keywords:[a,b,c], metadata.category:x, metadata.aliases:[p,q]; one with single-string keyword; one with no metadata.\n4. OUTPUT: `discover.Skill` type (the central index element) and the metadata extraction logic. Consumed by Index() in P1.M2.T5, resolve.Resolve in P1.M3.T7, and ui in P1.M2.T6.\n5. DOCS: none — internal package. The metadata conventions (keywords/category/aliases) are user-facing and documented in README §6 (Mode B final task)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M2.T5",
+              "title": "internal/discover — Index() walk (§7.1)",
+              "status": "Planned",
+              "description": "Walk the skills dir recursively and build the sorted skill index. A skill = any directory directly containing a SKILL.md (nested skills count). relTag is the dir path relative to the skills dir with OS separators normalized to `/`.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T5.S1",
+                  "title": "WalkDir-based Index() + relTag normalization + sorting",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T4.S2"],
+                  "prd_selectors": ["h3.5", "h2.6", "h2.9"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See go_architecture.md (relTag normalization) — filepath.WalkDir yields OS-native separators; build relTag via filepath.Rel then filepath.ToSlash so tags are always `writing/reddit` cross-platform. Canonical comparisons are on the slash form.\n2. INPUT: `discover.Skill` + `newSkill()` + `ParseFrontmatter()` from P1.M2.T4. The absSkillsDir from skillsdir.Find() (passed in by main, not imported here — keep discover decoupled from skillsdir).\n3. LOGIC: Implement `func Index(absSkillsDir string) ([]Skill, error)`. Use `filepath.WalkDir(absSkillsDir, fn)`. For each entry that is a regular file named `SKILL.md`, treat its PARENT directory as a skill dir; compute RelTag = ToSlash(Rel(absSkillsDir, parentDir)); parse frontmatter via ParseFrontmatter(parentDir+\"/SKILL.md\"); build Skill via newSkill. Collect all; then SORT the result by RelTag ascending (deterministic output for --all/--list). Dedup is NOT required here (duplicate-name detection is a `check` concern in P1.M4.T10, not index build). Handle a missing/empty skills dir: return empty slice, nil error (callers decide exit codes). TEST: a temp tree with skills/foo/SKILL.md, skills/writing/reddit/SKILL.md (nested), skills/empty/SKILL.md, skills/no-md/ (dir without SKILL.md — must be skipped); assert index length, sorted order, and that nested relTag is `writing/reddit`.\n4. OUTPUT: `discover.Index(absSkillsDir) ([]Skill, error)` — the public entrypoint consumed by main (which calls it once per invocation, fast for a small tree). This []Skill is the input to resolve (P1.M3.T7), ui.PrintList (P1.M2.T6), search (P1.M4.T9), and check (P1.M4.T10).\n5. DOCS: none — internal package."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M2.T6",
+              "title": "--list catalog output (internal/ui package, §6.1)",
+              "status": "Planned",
+              "description": "Implement the human-readable catalog table for `skpp --list`: columns TAG, NAME, DESCRIPTION (wrapped). Adds the internal/ui package with ANSI color support gated on TTY + --no-color. Wires --list into main.go.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T6.S1",
+                  "title": "ui.PrintList table + ANSI/--no-color + --list wiring",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T3.S1", "P1.M2.T5.S1"],
+                  "prd_selectors": ["h3.1", "h3.2", "h2.5", "h2.6"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See go_architecture.md (ANSI color) — gate color on (stdout is a TTY) AND (--no-color NOT set). Path output (tag resolution) NEVER uses color; only --list/--search tables do. TTY detection: use os.Stdout.Stat() and check (mode & os.ModeCharDevice) != 0, to keep the single-dep invariant (yaml.v3 only) — do NOT add golang.org/x/term.\n2. INPUT: `[]discover.Skill` from P1.M2.T5.S1 (Index). The main.go arg parser / dispatch from P1.M1.T3.S1.\n3. LOGIC: Create `internal/ui/ui.go`. Implement `func PrintList(skills []discover.Skill, useColor bool, out io.Writer)`. Render a table: header row `TAG  NAME  DESCRIPTION`, then one row per skill sorted by RelTag (Index already sorts). TAG = RelTag; NAME = frontmatter Name (or `(none)` if empty); DESCRIPTION = frontmatter Description, wrapped to a reasonable width (default ~60 cols if terminal width unknown; simple word-wrap). If HasFM is false, show DESCRIPTION as `(missing)` per §7.3. Use ANSI codes for header/bold when useColor. Create a helper `func ShouldColor(noColorFlag bool) bool` = !noColorFlag && stdoutIsTTY. Wire into main.go: when `--list`/`-l` is the mode, call skillsdir.Find -> discover.Index -> ui.PrintList; if Index returns empty, print a message to stderr and exit 1 (PRD §6.1: `--list` exit 1 if no skills found).\n4. OUTPUT: `skpp --list` works end-to-end against the real (future) example skill. ui.PrintList is reused by --search (P1.M4.T9). The dispatch pattern in main.go for a \"mode\" command is established.\n5. DOCS: none — CLI surface still incomplete; README usage written in Mode B final task."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M3",
+          "title": "Tag resolution & path output (PRD §7.2, build order step 3)",
+          "status": "Planned",
+          "description": "Implement the canonical contract: `skpp <tag>` resolves a tag to a skill and prints its absolute directory path. Covers the §7.2 resolution precedence (exact relTag -> basename -> frontmatter name -> alias), the critical §6.4 error contract (failed/ambiguous -> nothing on stdout, error to stderr, exit 1), and the path modifiers (--file, --relative, --all).",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M3.T7",
+              "title": "internal/resolve — §7.2 precedence resolver",
+              "status": "Planned",
+              "description": "Pure resolution logic: given a tag and the skill index, apply the first-match-wins precedence (exact canonical relTag -> basename -> frontmatter name -> declared alias) and return the matched skill or a typed error (Unknown / Ambiguous with candidate tags).",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M3.T7.S1",
+                  "title": "Resolve() + Result/MatchKind + Unknown/Ambiguous errors",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T5.S1"],
+                  "prd_selectors": ["h3.6", "h3.1", "h3.4", "h2.6"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See go_architecture.md (internal/resolve) for the agreed type shape (Result, MatchKind, AmbiguousError, UnknownError). See PRD §7.2 examples: `skpp reddit` matches `writing/reddit` by basename (unambiguous); `skpp foo-helper` matches by frontmatter name.\n2. INPUT: `[]discover.Skill` (the index) from P1.M2.T5.S1.\n3. LOGIC: Create `internal/resolve/resolve.go`. Define `type MatchKind int` (Canonical, Basename, Name, Alias). `type Result struct { Skill discover.Skill; Match MatchKind }`. Typed errors: `type UnknownError struct{ Tag string }` and `type AmbiguousError struct{ Tag string; Candidates []string }`, both implementing `error` with a clear `.Error()` message. Implement `func Resolve(tag string, skills []discover.Skill) (Result, error)` applying §7.2 precedence, consulting each step ONLY if earlier produced nothing: (1) exact match on RelTag (case-sensitive) — single hit; (2) basename = last `/`-component of RelTag equals tag — if >1 distinct skills match -> AmbiguousError with their RelTags; (3) frontmatter Name equals tag — if >1 -> Ambiguous; (4) tag appears in some skill's Aliases — if >1 -> Ambiguous; (5) else UnknownError. Basename extraction: use the slash-normalized RelTag, split on `/`, take last element. TEST the PRD §7.2 examples table exactly: foo->canonical, writing/reddit->canonical, reddit->basename, foo-helper->name; plus ambiguous-basename, ambiguous-name, unknown.\n4. OUTPUT: `resolve.Resolve(tag, skills) (Result, error)` — pure, no I/O. Consumed by main's tag-resolution mode in P1.M3.T8.S1.\n5. DOCS: none — internal package. Resolution precedence is user-facing, documented in README §5/§7 (Mode B final task)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M3.T8",
+              "title": "main — tag resolution path output + modifiers",
+              "status": "Planned",
+              "description": "Wire tag resolution into main.go: `skpp <tag> [...]` resolves each tag and prints one absolute path per line in input order, enforcing the §6.4 error contract (any failure -> nothing on stdout, errors to stderr, exit 1). Add the path modifiers --file/-f (print SKILL.md path), --relative (paths relative to skills dir), --all/-a (all skills sorted by tag), and --no-color passthrough.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M3.T8.S1",
+                  "title": "skpp <tag> [...] output + §6.4 error contract (atomicity)",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T3.S1", "P1.M3.T7.S1"],
+                  "prd_selectors": ["h3.1", "h3.4", "h2.5", "h2.1", "h2.16"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See go_architecture.md (Output discipline §6.4) — this is the MOST CRITICAL contract for `$(...)` safety. Resolve ALL tags first, collect errors, and ONLY if all succeed print paths; on ANY failure print one error line per problem tag to stderr, print NOTHING to stdout, exit 1. Buffer stdout; never partially print.\n2. INPUT: `resolve.Resolve()` from P1.M3.T7.S1; `skillsdir.Find()` + `discover.Index()` from M1/M2; the main.go dispatch from P1.M1.T3.S1.\n3. LOGIC: In main.go, when positional args are tags (the default resolution mode): call skillsdir.Find (on error: stderr + exit 1); discover.Index; for each tag call resolve.Resolve. Collect (skill, error) per tag. If any error: for each errored tag print one line to STDERR (UnknownError -> `skpp: unknown tag '<tag>'`; AmbiguousError -> `skpp: ambiguous tag '<tag>', candidates: <space-joined Candidates>`); print NOTHING to stdout; os.Exit(1). If all resolve: print each skill.Dir (absolute) on its own line to stdout, in INPUT order; exit 0. Default output unit is the DIRECTORY (PRD §3 decision). The output must be ABSOLUTE by default (PRD §6.1/§13: `case \"$(./skpp example)\" in /*)`). TEST: multi-tag all-good prints N lines in order; one-bad-tag prints nothing to stdout, errors to stderr, exit 1; ambiguous prints candidates to stderr. Capture stdout/stderr separately in tests.\n4. OUTPUT: `skpp <tag> [<tag>...]` fully working per §6.1 row 1 and §6.4. Establishes the atomic-output pattern that modifiers (S2) layer onto.\n5. DOCS: none — CLI surface still gaining flags; README usage written in Mode B final task."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M3.T8.S2",
+                  "title": "Modifiers: --file/-f, --relative, --all/-a",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M3.T8.S1"],
+                  "prd_selectors": ["h3.2", "h3.1", "h2.5", "h2.12"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See external_deps.md §2 — pi accepts either a SKILL.md file path OR a directory via --skill; skpp defaults to dir (includes assets) and --file gives the SKILL.md path. --all prints every skill sorted by tag. --relative is a machine-local convenience (default absolute).\n2. INPUT: The tag-resolution output path from P1.M3.T8.S1 (which already buffers + prints absolute Dir paths).\n3. LOGIC: Extend main.go: add boolean flags `--file`/`-f`, `--relative`, `--all`/`-a` (and --no-color, already a concept in ui). --file changes the printed unit from Skill.Dir to Skill.SourceFile (the SKILL.md path). --relative changes printed paths from absolute to relative-to-skillsDir (use filepath.Rel(skillsDir, path) then ToSlash). --all: ignore positional tags, resolve every skill in the index, print paths sorted by RelTag (Index is already sorted), exit 0. --all + --file prints SKILL.md paths for all; --all + --relative prints relative tags. --all may be combined with --file/--relative but NOT with positional tags (mutual-exclusivity enforced in P1.M5.T11). Keep the §6.4 atomicity for the --all case trivially (all from one index, no failures). TEST: `skpp -f example` prints .../skills/example/SKILL.md; `skpp --relative example` prints `example`; `skpp --all` prints one line per skill sorted; `skpp -f --all` combination.\n4. OUTPUT: Full path-output surface (--file, --relative, --all) integrated with the §6.4 contract. Acceptance §13 lines `test -f \"$(./skpp -f example)\"` and `case \"$(./skpp example)\" in /*)` now satisfiable once the example skill exists (P1.M6.T12).\n5. DOCS: none — CLI flags still being finalized; README written in Mode B final task."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M4",
+          "title": "Search & validation (PRD §9, build order step 4)",
+          "status": "Planned",
+          "description": "Add the discovery-oriented commands: `skpp --search <q>` (case-insensitive substring over tag/name/description/keywords) reusing the ui table, and `skpp check` (validate every skill on disk per §9 with OK/WARN/ERROR lines and a summary). Both consume the discover.Index built in M2.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M4.T9",
+              "title": "--search (§6.1)",
+              "status": "Planned",
+              "description": "Substring (case-insensitive) search over tag, frontmatter name, description, and metadata.keywords, reusing the --list table format. Exit 0 normally; exit 1 if no matches.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M4.T9.S1",
+                  "title": "Substring search over tag/name/description/keywords + ui reuse",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M2.T6.S1"],
+                  "prd_selectors": ["h3.1", "h2.6", "h2.5"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See mcpeepants_patterns.md — mcpeepants --search is the analog. skpp reuses ui.PrintList (from P1.M2.T6.S1) for output, so this is a filter + wiring task, small SP.\n2. INPUT: `discover.Index()` ([]Skill) from P1.M2.T5; `ui.PrintList()` from P1.M2.T6.S1; main.go dispatch from P1.M1.T3.S1.\n3. LOGIC: In main.go add `--search`/`-s <q>` mode. Build the index, then filter to skills where (case-insensitive) q is a substring of: RelTag, Name, Description, OR any of Keywords. Reuse ui.PrintList on the filtered set. If filtered set is empty, print a `no matches` message to stderr and exit 1 (PRD §6.1: --search exit 1 if no matches). --search is mutually exclusive with tags/--list/--all (enforced in P1.M5.T11). TEST: a query matching a keyword only; a query matching description; case-insensitivity; no-match -> exit 1 + stderr.\n4. OUTPUT: `skpp --search <q>` works, reusing the list table. The search field set (tag/name/description/keywords) is the documented contract.\n5. DOCS: none — CLI still finalizing; README usage in Mode B final task."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M4.T10",
+              "title": "skpp check — validation (§9)",
+              "status": "Planned",
+              "description": "Walk the store and report per-skill validation: ERROR if no SKILL.md, missing name/description, name violates Agent Skills rules, or duplicate frontmatter name; WARN if description > 1024 chars. One OK/WARN/ERROR line per skill plus a summary line. Exit 0 if clean, 1 if any ERROR.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M4.T10.S1",
+                  "title": "Validation rules (§9) + output format + exit codes",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T5.S1"],
+                  "prd_selectors": ["h2.8", "h2.9", "h2.2", "h3.5"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See external_deps.md §1 for VERIFIED name rules (regex `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, length 1-64, no consecutive hyphens — the alternation forbids them) and description max 1024 chars. See go_architecture.md (testing strategy).\n2. INPUT: `discover.Index()` from P1.M2.T5.S1 (walks the store, already parses frontmatter). Note: Index skips dirs without SKILL.md, so `check` ALSO needs to find skill dirs lacking SKILL.md — add a separate walk (or extend Index) to detect dirs that LOOK like skills (non-empty, contain scripts/assets) but have no SKILL.md. Simplest: walk skills/; for every immediate-or-nested dir that has any file but no SKILL.md, emit ERROR 'no SKILL.md'.\n3. LOGIC: Create `internal/check` (or a check.go in an existing package). Implement validation per §9: ERROR if skill dir has no SKILL.md; ERROR if frontmatter missing name or description or description empty; ERROR if name violates rules (regex + length); ERROR if duplicate frontmatter name across skills (collect names, find dupes); WARN if description > 1024 chars. Output format: one line per skill -> `OK   <relTag> (<name>)`; problem lines prefixed `ERROR`/`WARN`. Final summary line: `N skills, M errors, K warnings`. Exit 0 if no ERROR, else exit 1. Wire as `skpp check` subcommand in main.go. TEST: a clean skill -> OK line + exit 0; a skill with bad name -> ERROR; a skill missing description -> ERROR; a >1024 description -> WARN; two skills same name -> ERROR duplicate; a dir with files but no SKILL.md -> ERROR.\n4. OUTPUT: `skpp check` works end-to-end. The validation rule set is the documented contract (README §6 references `skpp check`).\n5. DOCS: none — internal logic; the user-facing `check` usage is documented in README (Mode B final task)."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M5",
+          "title": "CLI surface & error semantics (PRD §6.3/§6.4, build order step 5)",
+          "status": "Planned",
+          "description": "Lock down the full CLI contract: --help/-h usage text (to stdout, exit 0), no-args -> usage to stderr exit 1, unknown flags -> exit 2, and mutual exclusivity of modes (tags vs --list/--search/--all -> exit 2). This is the polish layer that makes the CLI's exit codes and stream discipline exactly match §6.3/§6.4.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M5.T11",
+              "title": "Full CLI flag matrix, help text & exit-code/error semantics",
+              "status": "Planned",
+              "description": "Finalize the arg parser: complete --help/-h usage text covering all flags/subcommands; enforce no-args (usage to stderr, exit 1), unknown flags (exit 2), and mode mutual exclusivity (positional tags mixed with --list/--search/--all -> exit 2). Ensure --help/--version take precedence over everything.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M5.T11.S1",
+                  "title": "--help text + no-args/unknown-flag/mode-exclusivity exit codes",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M3.T8.S2", "P1.M4.T9.S1", "P1.M4.T10.S1"],
+                  "prd_selectors": ["h3.1", "h3.2", "h3.3", "h3.4", "h2.5"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See go_architecture.md (Exit codes). Mirror the help-text STRUCTURE of mcpeepants get-server-config.sh (USAGE / EXAMPLES / OPTIONS sections) but for the full skpp flag matrix. See PRD §6.3/§6.4 for exact semantics.\n2. INPUT: The complete set of flags/subcommands from M1-M4: --path/-p, --version/-v, --help/-h, --list/-l, --search/-s, --all/-a, --file/-f, --relative, --no-color, `check`, and positional tags. The arg parser from P1.M1.T3.S1 (now extended).\n3. LOGIC: Finalize main.go arg parsing and dispatch. (a) `--help`/`-h`: print full usage to STDOUT, exit 0; takes precedence over everything (after --version tiebreak: both -> help wins or version wins consistently — pick help). Usage text lists every flag/subcommand with a one-line description and the canonical `pi --skill \"$(skpp tag)\"` example. (b) No args AND no flag: print usage to STDERR, exit 1 (parity with get-server-config.sh). (c) Unknown flag (any token starting with `-` not in the known set): print `skpp: unknown flag '<x>'` to stderr, exit 2. (d) Mode mutual exclusivity: if positional tags are present together with any of --list/--search/--all, print error to stderr, exit 2. (e) `check` is a subcommand (positional `check` as first arg), mutually exclusive with tag resolution. TEST each branch: no-args->stderr+exit1; `skpp --bogus`->exit2; `skpp foo --list`->exit2; `skpp --help`->stdout+exit0; `skpp check` dispatches to check.\n4. OUTPUT: The CLI surface is complete and matches §6.1-§6.4 exactly. All exit codes (0/1/2) and stdout/stderr discipline verified. This is the gate before packaging/docs.\n5. DOCS: none directly — but the help text itself is user-facing and should be consistent with the README written in the Mode B final task (P1.M6.T16.S2)."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M6",
+          "title": "Example skill, packaging, docs & completions (PRD §11/§12/§14/§15, build order steps 6-8)",
+          "status": "Planned",
+          "description": "Ship the one example skill, the install.sh (build + symlink + PATH), the README (full §15 outline), shell completions (bash/zsh/fish, dynamic via skpp --all), run the full §13 acceptance suite, and perform the final changeset-level documentation sync. With this milestone the repo is a complete, installable, documented one-shot deliverable.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M6.T12",
+              "title": "The one shipped example skill (§11)",
+              "status": "Planned",
+              "description": "Create exactly one example skill at skills/example/SKILL.md with the exact frontmatter and body from PRD §11. This makes --list/resolution demonstrable out of the box and is required for the §13 acceptance commands.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M6.T12.S1",
+                  "title": "skills/example/SKILL.md (exact PRD §11 content)",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M4.T10.S1"],
+                  "prd_selectors": ["h2.10", "h2.9", "h2.12", "h2.1"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See external_deps.md §1 — the example's frontmatter (name: example, description via yaml `>` folded scalar, metadata.keywords/category) is spec-compliant. This is the ONLY shipped skill (PRD §2 constraint 4, §17). Do NOT add any other skill.\n2. INPUT: The discover/check logic from M2/M4 to validate it (run `skpp check` after creating it; must report OK).\n3. LOGIC: Create `skills/example/SKILL.md` with EXACTLY the content in PRD §11 (frontmatter: name: example; description folded scalar 'Reference example skill for skpp...'; metadata.keywords: [example, demo, skpp]; metadata.category: meta; body with the Try: examples). Verify with `./skpp check` (exit 0, OK line) and `./skpp example` resolves to it. Remove the throwaway skills/.gitkeep from P1.M1.T3.S1 if present (the example dir replaces it). Confirm the example skill does NOT live in a pi auto-discovery location (it is at <repo>/skills/, not ~/.pi/... or .pi/skills).\n4. OUTPUT: skills/example/SKILL.md committed. `./skpp example`, `./skpp -f example`, `./skpp --list`, `./skpp check` all work against it.\n5. DOCS: none — the example skill body is self-documenting; README usage references it (Mode B final task)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M6.T13",
+              "title": "install.sh — build + symlink into PATH (§12.1)",
+              "status": "Planned",
+              "description": "Create install.sh that builds the binary with version ldflags and SYMLINKS (not copies) it into a target bin dir, ensuring os.Executable() resolves back to the repo so the sibling-of-binary rule finds skills/. Also handles PATH advice and prints a verification command.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M6.T13.S1",
+                  "title": "install.sh: build + symlink + target selection + PATH advice + verify",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M5.T11.S1"],
+                  "prd_selectors": ["h3.8", "h3.9", "h2.12", "h2.7", "h2.11"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See mcpeepants_patterns.md — mcpeepants QUICK_INSTALL.sh only installs completions; skpp's install.sh does MORE (build + symlink). The CRITICAL difference: skpp SYMLINKS the binary (not copies) so §8.2 sibling-of-binary resolution works. Copying breaks it; users who copy must set SKPP_SKILLS_DIR (document this). Verified in verified_symlink_resolution.md that cross-dir symlinks resolve correctly.\n2. INPUT: A building `skpp` binary from M1-M5 (main.go complete). The version-injection pattern (`var version` + `-X main.version=...`) from P1.M1.T3.S1.\n3. LOGIC: Create `install.sh` (bash, `set -euo pipefail`). Steps per §12.1: (1) `cd` to script's own dir (repo root) via `$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)`. (2) Verify `go` on PATH; if not, print install instructions (golang.org/dl) and exit 1. (3) `go build -trimpath -ldflags \"-s -w -X main.version=$(git describe --tags --always 2>/dev/null || echo dev)\" -o skpp .`. (4) Pick target bin dir: `$SKPP_INSTALL_BIN` (if set) -> `$HOME/.local/bin` (if present or creatable) -> `/usr/local/bin` (if writable, else sudo). (5) SYMLINK `<target>/skpp` -> `<repo>/skpp` (use `ln -sf` to refresh if exists); do NOT copy. (6) Ensure target dir on PATH; if not, detect shell ($SHELL) and print the exact `export PATH=...` line for ~/.bashrc / ~/.zshrc / ~/.config/fish/config.fish. (7) Print verification: `skpp example`. TEST: run install.sh into a temp bin dir on PATH, then invoke `skpp` and confirm `skpp --path` resolves to the repo skills/ (proves the symlink chain). Test `SKPP_INSTALL_BIN` override.\n4. OUTPUT: install.sh that produces a working, repo-resolving `skpp` on PATH. Mirrors QUICK_INSTALL.sh spirit + adds the Go build/symlink.\n5. DOCS: [Mode A] install.sh usage is referenced by README §3 (Install) — but the README itself is written in P1.M6.T16.S2 (Mode B final task); no separate doc file here. The go-install caveat (SKPP_SKILLS_DIR required for `go install`) is captured in README §3."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M6.T14",
+              "title": "README.md (full §15 outline)",
+              "status": "Planned",
+              "description": "Write the user-facing README mirroring mcpeepants tone/structure, following the PRD §15 outline: title+one-liner, why, install (install.sh / go install + SKPP_SKILLS_DIR caveat / from-source), usage (canonical pi --skill example, multi-skill, -f, --list, --search, --all, check, --path), where skills live, adding a skill, how skpp finds the store, constraints.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M6.T14.S1",
+                  "title": "README.md per §15 outline (mcpeepants tone)",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M6.T13.S1", "P1.M6.T12.S1"],
+                  "prd_selectors": ["h2.14", "h2.0", "h2.1", "h2.5", "h2.6", "h2.7", "h2.16", "h2.18"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See mcpeepants_patterns.md for the README tone (short, example-driven, leading with the canonical one-liner). PRD §15 gives the exact 8-section outline. Follow the write-tech-docs conventions (no em dashes, no marketing tell-words, front-load the answer) — the repo will later be linted if the write-tech-docs skill is applied, so keep prose clean now.\n2. INPUT: The COMPLETE CLI surface from M1-M5 (all flags/subcommands/exit codes), the example skill (P1.M6.T12.S1), and install.sh (P1.M6.T13.S1). The §8 resolution rules and §7 tag precedence.\n3. LOGIC: Create `README.md` with the §15 sections: (1) Title + one-liner 'Standalone skill loader for pi — resolves a skill tag to an absolute path for pi --skill.' (2) Why: centralized skills, NOT in any pi discovery location, loaded only on demand. (3) Install: install.sh (symlink) / go install (+ prominent SKPP_SKILLS_DIR caveat: a go install'd binary has no adjacent skills/ so must point SKPP_SKILLS_DIR at the cloned store) / from-source. (4) Usage: the canonical `pi --skill \"$(skpp tag)\"`, multi-skill, -f, --list, --search, --all, check, --path — each with a short example. (5) Where skills live: skills/ dir, tag = relative dir path, discovery rules §7. (6) Adding a skill: drop <tag>/SKILL.md under skills/; required frontmatter; run skpp check. (7) How skpp finds the store: §8 rules + SKPP_SKILLS_DIR. (8) Constraints: manifest-free; never auto-discovered by pi; loads only via --skill. Ensure every flag documented in §6.1/§6.2 appears in usage.\n4. OUTPUT: README.md committed, covering the full product surface and the §15 outline. This is the bulk of the changeset-level docs; the final sync task (P1.M6.T16.S2) verifies it stays consistent with the implemented CLI.\n5. DOCS: [Mode A] This subtask's deliverable IS the README, so it is self-contained. The final cross-cutting sync (P1.M6.T16.S2) will re-check README consistency against the final binary after acceptance."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M6.T15",
+              "title": "Shell completions — bash/zsh/fish (§14)",
+              "status": "Planned",
+              "description": "Ship dynamic completions for bash, zsh, and fish that complete flags/subcommands AND tags (by invoking `skpp --all`, disk-derived, no hardcoded tag list — manifest-free). Mirrors mcpeepants completion-file structure but with dynamic tag sourcing. May be deferred per PRD §14 but flag clearly if so.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M6.T15.S1",
+                  "title": "completions/skpp.bash + _skpp (zsh) + skpp.fish (dynamic tags)",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M3.T8.S2"],
+                  "prd_selectors": ["h2.13", "h3.1", "h3.2", "h2.5"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See mcpeepants_patterns.md — mcpeepants completions HARDCODE the server list from servers.json. skpp MUST NOT hardcode tags (manifest-free, §1). Instead, dynamic completion calls `skpp --all` (cheap disk walk) and offers the printed paths' relTag/basename. Adapt the bash/zsh/fish STRUCTURE from mcpeepants but swap the data source to a runtime `skpp --all` call.\n2. INPUT: `skpp --all` output (one absolute path per skill, sorted by tag) from P1.M3.T8.S2. The full flag set from §6.1/§6.2.\n3. LOGIC: Create three files under `completions/`. (a) `skpp.bash`: a `_skpp_completion()` function; after `-*` prefix, complete flags (--all/-a --list/-l --search/-s --path/-p --file/-f --version/-v --help/-h --no-color --relative) + subcommand `check`; otherwise run `skpp --all`, take basename of each path (or relTag form), offer via compgen. Register with `complete -F _skpp_completion skpp`. (b) `_skpp` (zsh): `#compdef skpp`; use `_arguments` for flags and a helper that runs `skpp --all` for positional completion. (c) `skpp.fish`: `complete -c skpp` lines for each flag + `-a \"(skpp --all | xargs -n1 basename)\"` style for tags. All three must gracefully degrade if `skpp --all` fails (empty completion, no error). Add a short note in README (via P1.M6.T16.S2) on how to source/install them (mirror QUICK_INSTALL shell detection, or just a one-line `source` instruction).\n4. OUTPUT: Three completion files, dynamic, manifest-free. If time-boxed, this is the ONLY deferrable deliverable (PRD §14) — if deferred, state it explicitly in the PR description rather than silently omitting.\n5. DOCS: [Mode A] completion install instructions are added to README §3 by the final sync task (P1.M6.T16.S2). No separate doc file."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M6.T16",
+              "title": "Acceptance suite + sync changeset-level documentation (Mode B)",
+              "status": "Planned",
+              "description": "Run the full PRD §13 acceptance criteria verbatim and fix any regressions, then perform the final cross-cutting documentation sync: ensure README matches the implemented CLI exactly, all flags/exit codes documented, and any overview docs are consistent. This is the Mode B catch-all that prevents a coherent delta from shipping with stale docs (§5).",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M6.T16.S1",
+                  "title": "Run PRD §13 acceptance suite; fix regressions",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M6.T12.S1", "P1.M6.T13.S1", "P1.M5.T11.S1", "P1.M6.T14.S1"],
+                  "prd_selectors": ["h2.12", "h2.1", "h2.5", "h2.7", "h2.16", "h2.18"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See codebase_state.md (Risk areas) and verified_symlink_resolution.md (the §13 symlink test). The §13 suite is the authoritative gate; every line must pass. The pi line specifically proves the store is NOT auto-discovered (loads only via --skill under --no-skills).\n2. INPUT: The complete, building `skpp` from M1-M6; the example skill; install.sh.\n3. LOGIC: From a clean clone at the repo root, run EVERY command in PRD §13 verbatim and confirm each passes: `go build -o skpp . && echo OK`; `./skpp --version`; `test \"$(./skpp --path)\" = \"$PWD/skills\"`; `./skpp --list`; `test -d \"$(./skpp example)\"`; `test -f \"$(./skpp -f example)\"`; the unknown-tag contract (nothing on stdout, exit 1); the absolute-path contract; `./skpp check` (exit 0); the pi end-to-end `pi --no-skills --skill \"$(./skpp example)\" -p \"...\"` (confirm output references the example skill, no error, proving --no-skills + explicit --skill works); the symlink test `/tmp/skpp-bin/skpp example` resolves to $PWD/skills/example; `SKPP_SKILLS_DIR=\"$PWD/skills\" ./skpp example`. For any failing line, trace to the responsible subtask's package and fix (do NOT weaken the test — fix the code). Re-run until all green. Also run `go test ./...` (all unit tests pass) and `go vet ./...` clean.\n4. OUTPUT: All §13 acceptance lines pass. A green, installable, documented `skpp`. Any deviations from the PRD are explicitly justified.\n5. DOCS: none — this is verification; documentation consistency is the next subtask."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M6.T16.S2",
+                  "title": "Sync changeset-level documentation (Mode B final sweep)",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T1.S1", "P1.M1.T2.S1", "P1.M1.T2.S2", "P1.M1.T2.S3", "P1.M1.T3.S1", "P1.M2.T4.S1", "P1.M2.T4.S2", "P1.M2.T5.S1", "P1.M2.T6.S1", "P1.M3.T7.S1", "P1.M3.T8.S1", "P1.M3.T8.S2", "P1.M4.T9.S1", "P1.M4.T10.S1", "P1.M5.T11.S1", "P1.M6.T12.S1", "P1.M6.T13.S1", "P1.M6.T14.S1", "P1.M6.T15.S1", "P1.M6.T16.S1"],
+                  "prd_selectors": ["h2.14", "h2.5", "h2.6", "h2.7", "h2.12", "h2.16", "h2.18"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: Per the SOW §5 (DOCUMENTATION SYNC MODE B), this is the mandatory final cross-cutting docs task. It depends on EVERY implementing subtask (all 20) so it is guaranteed to run last and prevents stale overview docs. README.md was written in P1.M6.T14.S1; this task verifies + patches consistency against the FINAL implemented binary (post-acceptance).\n2. INPUT: The final `skpp` binary (post §13 acceptance, P1.M6.T16.S1); the README from P1.M6.T14.S1; completions from P1.M6.T15.S1; install.sh from P1.M6.T13.S1.\n3. LOGIC: Sweep changeset-level docs for drift. Specifically: (a) Run `./skpp --help` and diff its flag list against README §4 Usage — every flag/subcommand in the binary must appear in the README, and vice versa. (b) Confirm README §7 (how skpp finds the store) matches the implemented §8 priority order (env -> sibling-of-binary -> walk-up). (c) Confirm README §3 Install documents both install.sh (symlink) AND go install (with the prominent SKPP_SKILLS_DIR caveat). (d) Add/verify a short note on sourcing the shell completions (§14). (e) Confirm constraints section (§8 of README) lists: manifest-free; never auto-discovered by pi; loads only via --skill; no runtime deps. (f) If the write-tech-docs skill is available, optionally run its linter on README and fix hits (no em dashes, no marketing words). Update README.md in place. Do NOT create new doc files unless an overview gap is found.\n4. OUTPUT: README.md (and any overview doc) fully consistent with the shipped binary. The changeset ships with coherent, non-stale documentation.\n5. DOCS: [Mode B] This IS the changeset-level documentation sync task. It updates README.md to match the final implemented CLI surface."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
