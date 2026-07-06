@@ -133,7 +133,7 @@
               "type": "Task",
               "id": "P1.M2.T4",
               "title": "internal/discover — frontmatter model & parser (§7.3)",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Define the frontmatter/Skill data model and the lenient frontmatter parser. Extracts the YAML block between the first two `---` lines, unmarshals with yaml.v3 (ignoring unknown keys), and pulls skpp conventions (keywords/category/aliases) out of the metadata map. Handles missing frontmatter gracefully (skill still resolves by directory).",
               "subtasks": [
                 {
@@ -157,7 +157,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T4.S2",
                   "title": "metadata extraction (keywords/category/aliases) + Skill type",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T4.S1"
