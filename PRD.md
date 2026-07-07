@@ -24,7 +24,7 @@ pi can load skills from many "official" discovery locations (see §3). The user 
 
 ## 2. Hard constraints (non-negotiable)
 
-1. **Manifest-free.** There is **no** `skills.json` / `skills.yaml` / index file. Everything the tool needs is **inferred from the disk**: the directory layout (tag + path) and the `SKILL.md` frontmatter (name, description, search keywords). If a piece of information can be read off the filesystem, it must be — never duplicated into a sidecar file.
+1. **No catalog index — disk-discovered.** There is no `skills.json` / index file enumerating the skill *catalog*; the set of skills is always computed by walking the store on each call, so dropping in a directory with a `SKILL.md` makes it instantly available — no rebuild step, no index/disk drift to debug. This is specifically about the **catalog**. It does **not** prohibit a small **settings** file for things the filesystem cannot express — today, where the store lives (see §8). Catalog data already on disk is never duplicated into a sidecar; settings are not catalog data.
 2. **No auto-discovery by pi.** Skills live in a location pi does **not** scan. They load **only** through `pi --skill "$(skpp <tag>)"`. The store must never be `~/.pi/agent/skills`, `~/.agents/skills`, a project `.pi/skills` or `.agents/skills`, a `node_modules` package, or anything with a `pi.skills` entry in `package.json`.
 3. **`skpp <tag>` prints exactly one absolute path** (to stdout, trailing newline) for a resolved skill — the canonical contract. Unknown tag ⇒ **nothing on stdout**, error to stderr, exit 1.
 4. **No development of skills beyond one example.** Ship exactly **one** example skill to prove the pipeline. The repo is a loader, not a skill library.
@@ -114,6 +114,7 @@ Binary name: **`skpp`**. Flags use POSIX double-dash long form + single-dash sho
 | `skpp --list` / `-l` | Human-readable catalog. | Table: `TAG`, `NAME`, `DESCRIPTION` (wrapped). | `0` (`1` if no skills found) |
 | `skpp --search <q>` / `-s <q>` | Substring (case-insensitive) search over tag, frontmatter `name`, `description`, and `metadata.keywords`. | Same table format as `--list`, filtered. | `0`; `1` if no matches |
 | `skpp check` | Validate every skill on disk (see §9). | Report: `OK` lines + any `WARN`/`ERROR` lines. | `0` if clean; `1` if any ERROR |
+| `skpp init` | First-run setup (see §8.2): prompt for the skills store dir, create it if missing, write the config, seed a template if empty, validate. Non-interactive: `skpp init <dir>` / `skpp init --store <dir>`. | The configured store path. | `0` on success; `1` on error/cancel |
 | `skpp --path` / `-p` | Where is `skpp` looking? | Absolute path of the resolved skills dir. | `0` (`1` if unresolvable) |
 | `skpp --help` / `-h` | Usage. | Help text (to stdout). | `0` |
 | `skpp --version` / `-v` | Version. | `skpp <version>` (single line). | `0` |
@@ -136,7 +137,7 @@ Binary name: **`skpp`**. Flags use POSIX double-dash long form + single-dash sho
 
 - **Any** unresolved/ambiguous tag in a `skpp <tag>...` invocation ⇒ print **one** error line per problem tag to stderr, print **nothing** to stdout, exit `1`. This guarantees `pi --skill "$(skpp badtag)"` fails loudly rather than passing a garbage path.
 - Ambiguous tag (a short name matching >1 skill) ⇒ stderr lists the candidate full tags, exit `1`.
-- Skills dir cannot be located ⇒ stderr: concise reason + the fix (`set $SKPP_SKILLS_DIR`, or `cd` into the repo, or reinstall), exit `1`.
+- Skills dir cannot be located / skpp is unconfigured ⇒ stderr: `skpp is not configured; run \`skpp init\`` (or, if configured but the dir vanished, the concise reason + fix), exit `1`. Bare tag resolution **never** prompts (see §8.2), so `pi --skill "$(skpp x)"` fails loudly instead of hanging inside command substitution.
 
 ---
 
@@ -182,16 +183,47 @@ Examples (assume skills `skills/foo/SKILL.md` with `name: foo-helper`, and `skil
 
 ---
 
-## 8. Locating the skills directory (priority order)
+## 8. Locating the skills directory
 
-`skpp` must find `<store>/skills` without a manifest. Resolve in this order, first hit wins:
+`skpp` does not assume the store lives next to the binary or inside a checkout. A small settings file records where the user keeps their skills, written by `skpp init` on first use. The store can live anywhere.
 
-1. **`SKPP_SKILLS_DIR` env var** — if set and points to an existing dir, use it (allows the store to live anywhere; lets you point at multiple stores by re-invoking with a different env).
-2. **Sibling of the running binary** — compute `exe, _ := os.Executable()`, then `real, _ := filepath.EvalSymlinks(exe)`; let `repoDir = filepath.Dir(real)`; if `repoDir/skills` exists, use it. This is what makes a **symlink install** work (`~/.local/bin/skpp → ~/projects/skpp/skpp` resolves back to the repo).
-3. **Walk up from `cwd`** — for `go run` / dev use (where the binary is in a temp dir): ascend from the current working directory; the first ancestor containing a `skills/` subdir with at least one `SKILL.md` wins.
-4. **None found** ⇒ stderr error + exit `1`, with a one-line fix.
+### 8.1 Configuration file
 
-> `skpp --path` reports which rule won. This is the single most failure-prone area — implement and test it first (see §13 acceptance).
+- Default location: `$XDG_CONFIG_HOME/skpp/config.yaml` (→ `~/.config/skpp/config.yaml`). Override the file path with `SKPP_CONFIG=<file>` (useful for tests / multiple profiles).
+- This is the **one** fixed, well-known path the binary can bootstrap from; it must not depend on the store location (chicken-and-egg: you cannot discover the config from the dir the config points at).
+- Format: YAML (reuses the existing `yaml.v3` dependency). Minimal valid file:
+
+  ```yaml
+  store: /home/dustin/skills
+  ```
+
+- Unknown keys are ignored (room to grow: default category, color prefs, etc.). A missing or unreadable config is treated as "not yet configured" and falls through to §8.3 rules 3-5 — never a hard error.
+
+### 8.2 First-run setup — `skpp init`
+
+`skpp init` is the documented first command and the **only** place skpp prompts interactively.
+
+Interactive (TTY) flow:
+
+1. Prompt: "Where should skpp keep your skills?" Default: `$XDG_DATA_HOME/skpp/skills` (→ `~/.local/share/skpp/skills`).
+2. `mkdir -p` the chosen dir if it does not exist.
+3. If the dir is empty, seed `example/SKILL.md` as a copy-paste template (a string constant compiled into the binary — **not** `go:embed` of a directory; nothing about the user's collection is compiled in). If the dir already contains skills, adopt it in place; never clobber or delete.
+4. Write `config.yaml` (at `$SKPP_CONFIG` or the default location) with the absolute `store` path.
+5. Print the output of `skpp --path` (which rule won) and `skpp check`.
+
+Non-interactive: `skpp init <dir>` or `skpp init --store <dir>` (for scripts / CI). `SKPP_SKILLS_DIR` set at runtime still bypasses the config entirely.
+
+**Prompt safety (load-bearing):** the bare `skpp <tag>` path **never** prompts. If unconfigured (every rule in §8.3 misses), it writes to stderr exactly `skpp is not configured; run \`skpp init\``, exits `1`, and writes **nothing** to stdout — so `pi --skill "$(skpp x)"` fails loudly instead of hanging inside command substitution. Any convenience auto-prompt anywhere else must be gated on `isatty(stdin)`.
+
+### 8.3 Resolution priority (first hit wins)
+
+1. **`SKPP_SKILLS_DIR` env var** — override; if set and an existing dir, use it. Lets CI / tests / temporary redirects win without editing the config.
+2. **Config file `store`** (§8.1) — the primary, set by `skpp init`.
+3. **Sibling of the running binary** (symlink-aware: `os.Executable()` + `filepath.EvalSymlinks()`) — still lets a clone-and-build dev workflow work with zero config.
+4. **Walk up from `cwd`** — for `go run` / dev.
+5. **None** ⇒ unconfigured: stderr one-line fix (`run \`skpp init\``), exit `1`.
+
+`skpp --path` reports which rule won, on stderr, with one of the labels: `SKPP_SKILLS_DIR`, `config file`, `sibling of binary`, `ancestor of cwd`. This matters because a bad `SKPP_SKILLS_DIR` value is silently ignored and falls through — `--path` is the only way to tell which directory actually won. This remains the single most failure-prone area — implement and test it first (see §13 acceptance).
 
 ---
 
@@ -296,11 +328,11 @@ Behavior:
 6. Ensure the target dir is on `PATH`; if not, print the exact `export PATH=…` line for the detected shell (`~/.bashrc` / `~/.zshrc` / `~/.config/fish/config.fish`).
 7. Print a verification command: `skpp example`.
 
-> **Why symlink, not copy:** copying the binary to `~/.local/bin` breaks the "sibling of binary" rule (§8.2). Symlink keeps one source of truth. Users who copy must set `SKPP_SKILLS_DIR`.
+> **Why symlink, not copy:** with `skpp init` (§8) either works — copy is no longer fatal, because the store no longer has to be the binary's sibling. Symlink is still recommended for clone users: the sibling-of-binary rule then gives a zero-config default store (the repo's own `skills/`), and `git pull && go build` updates the linked binary in place. Clone users may run `skpp init` later only if they want to relocate the store.
 
 ### 12.2 `go install`
 
-Support `go install github.com/dabstractor/skpp@latest`. **Note** in the README that a `go install`'d binary lands in `$(go env GOPATH)/bin` and has **no** adjacent `skills/` dir, so the user must point `SKPP_SKILLS_DIR` at their cloned store. Document this prominently.
+`go install github.com/dabstractor/skpp@latest` is a first-class install path: the binary is self-sufficient. It lands in `$(go env GOPATH)/bin`; on first use the user runs `skpp init` (§8.2), which creates the store and writes the config. **No clone required, no `SKPP_SKILLS_DIR` needed for normal use.** The earlier caveat ("must clone the repo and set the env var") is obsolete under the config model and is removed.
 
 ### 12.3 Releases (optional, phase 2)
 
@@ -341,6 +373,21 @@ pi --no-skills --skill "$(./skpp example)" -p "briefly confirm the example skill
 ln -sf "$PWD/skpp" /tmp/skpp-bin/skpp 2>/dev/null || mkdir -p /tmp/skpp-bin && ln -sf "$PWD/skpp" /tmp/skpp-bin/skpp
 /tmp/skpp-bin/skpp example             # still resolves to $PWD/skills/example
 SKPP_SKILLS_DIR="$PWD/skills" ./skpp example   # env override works
+
+# Config + first-run (§8)
+mkdir -p /tmp/skpp-iso && cp ./skpp /tmp/skpp-iso/skpp && cd /tmp/skpp-iso
+# unconfigured (clean HOME, no config, no skills sibling, no walk-up ancestor): hint + exit 1
+env -u SKPP_SKILLS_DIR HOME=/tmp/skpp-iso/home XDG_CONFIG_HOME=/tmp/skpp-iso/home/.config \
+  ./skpp x 2>err; rc=$?
+[ "$rc" = 1 ] && grep -q 'run `skpp init`' err && echo "unconfigured-hint OK"
+# non-interactive init creates the store + writes the config
+SKPP_CONFIG=/tmp/skpp-iso/cfg.yaml ./skpp init --store /tmp/skpp-store
+test -d /tmp/skpp-store                                                    # store created
+grep -q 'store: /tmp/skpp-store' /tmp/skpp-iso/cfg.yaml                     # config written
+# config rule wins; and env still beats config
+SKPP_CONFIG=/tmp/skpp-iso/cfg.yaml ./skpp --path | grep -q /tmp/skpp-store
+SKPP_SKILLS_DIR=/tmp/skpp-store SKPP_CONFIG=/tmp/skpp-iso/cfg.yaml ./skpp --path 2>&1 | grep -q SKPP_SKILLS_DIR
+cd - >/dev/null
 ```
 
 All of the above must pass. The pi line must show the skill loaded with **`--no-skills`** (proving we rely solely on the explicit `--skill` path, never on auto-discovery).
@@ -364,12 +411,12 @@ Mirror the mcpeepants README's tone and structure:
 
 1. **Title + one-liner:** "Standalone skill loader for pi — resolves a skill tag to an absolute path for `pi --skill`."
 2. **Why:** centralized skills, **not** in any pi discovery location, loaded only on demand.
-3. **Install:** `install.sh` (symlink) / `go install` (+ `SKPP_SKILLS_DIR` caveat) / from-source.
+3. **Install:** `install.sh` (symlink) / `go install` (first-class) / from-source. First run: `skpp init` (prompts for the store dir, writes the config).
 4. **Usage:** the canonical `pi --skill "$(skpp tag)"` example, multi-skill example, `-f`, `--list`, `--search`, `--all`, `check`, `--path`.
 5. **Where skills live:** the `skills/` dir, the tag = relative dir path, the discovery rules (§7).
 6. **Adding a skill:** drop a `<tag>/SKILL.md` under `skills/`; required frontmatter; run `skpp check`.
-7. **How `skpp` finds the store:** §8 rules + `SKPP_SKILLS_DIR`.
-8. **Constraints:** manifest-free; never auto-discovered by pi; loads only via `--skill`.
+7. **How `skpp` finds the store:** §8 — `skpp init` writes a config pointing at the store; `SKPP_SKILLS_DIR` overrides it; sibling / walk-up are zero-config dev fallbacks.
+8. **Constraints:** no catalog index (disk-discovered); a settings config file is fine; never auto-discovered by pi; loads only via `--skill`.
 
 ---
 
@@ -389,7 +436,7 @@ Mirror the mcpeepants README's tone and structure:
 
 ## 17. Constraints & guardrails (do NOT do these)
 
-- ❌ Do **not** add a manifest/index file (`skills.json`, etc.). Infer from disk.
+- ❌ Do **not** add a **catalog** index/manifest (e.g. `skills.json` enumerating skills). The catalog is always walked from disk. A **settings** file (store location, etc.) is expected and fine — see §8; the rule is only that catalog data already on disk is never duplicated into a sidecar.
 - ❌ Do **not** place skills in any pi auto-discovery location. The store is loaded **only** via `--skill`.
 - ❌ Do **not** make `skpp` install/copy skills into `~/.pi/...` or `~/.agents/...`. It only prints paths.
 - ❌ Do **not** print anything to stdout on a failed/unknown tag resolution (breaks `pi --skill "$(skpp x)"`).
@@ -419,10 +466,13 @@ Mirror the mcpeepants README's tone and structure:
 | 2 | Visibility | **public** | Matches mcpeepants + user's other repos |
 | 3 | Language | **Go** | Static binary, instant startup, symlink-aware path resolution |
 | 4 | Output unit | **directory** (default), `--file` for `SKILL.md` | `--skill <dir>` is supported & includes assets |
-| 5 | Index/manifest | **none** — disk-discovered | Explicit user constraint |
+| 5 | Catalog index | **none** — walked from disk each call | Small, hand-edited catalog; an index would drift. *(Earlier this row claimed an "explicit user constraint" — that was a misattribution; the user did not request it. A **settings** config file is a separate concern and is now used — §8.)* |
 | 6 | Canonical tag | relative dir path under `skills/`; basename/name/alias fallbacks | Inferable from disk; tolerant of common usage |
 | 7 | Search metadata | `metadata.keywords`/`category`/`aliases` in frontmatter | Uses the spec's own optional `metadata` field |
 | 8 | Frontmatter parser | `gopkg.in/yaml.v3` | Robust; only third-party dep |
-| 9 | Install method | symlink binary into `~/.local/bin`; `SKPP_SKILLS_DIR` override | Lets `os.Executable()` find the repo |
+| 9 | Install method | `go install` / release binary / `install.sh`; `skpp init` configures the store | No clone forced. The binary is self-sufficient; first run prompts for (or is told via flag/env) the store dir. Sibling / walk-up rules kept as zero-config dev fallbacks. |
 | 10 | Shipped skills | exactly one `example` | Proves the pipeline; repo is a loader, not a library |
 | 11 | License | MIT | Match mcpeepants conventions |
+| 12 | Settings file | `$XDG_CONFIG_HOME/skpp/config.yaml`, key `store` (YAML; reuses `yaml.v3`); `SKPP_CONFIG` overrides the path | Fixed home so the binary can bootstrap without being told; YAML avoids a new dependency |
+| 13 | First-run UX | `skpp init` prompts interactively; bare tags never prompt (any auto-prompt TTY-gated) | Protects the `pi --skill "$(skpp x)"` contract from hanging inside command substitution |
+| 14 | Discovery order | env `SKPP_SKILLS_DIR` → config `store` → sibling of binary → walk-up → "run `skpp init`" | Env overrides config for CI/tests; heuristics kept as zero-config dev fallbacks |
