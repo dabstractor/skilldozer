@@ -1,6 +1,7 @@
 # Build output
 /skpp
 /dist
+/build
 
 # Test / coverage artifacts
 *.test

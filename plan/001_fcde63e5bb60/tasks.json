@@ -531,7 +531,7 @@
                   "type": "Subtask",
                   "id": "P1.M6.T16.S1",
                   "title": "Run PRD §13 acceptance suite; fix regressions",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M6.T12.S1",
