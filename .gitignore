@@ -1,7 +1,18 @@
+# Build artifacts
 /skilldozer
 /dist
+/build
 *.test
 *.out
+
+# Dependency directories
+node_modules/
+venv/
+
+# Environment files
+.env
+
+# OS-specific files
 .DS_Store
 
 # Agent runtime artifacts (transcripts, run logs, meta)

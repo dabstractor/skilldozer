@@ -18,7 +18,7 @@
               "type": "Task",
               "id": "P1.M1.T1",
               "title": "internal/config package — read/write the settings config file + resolve its path and default store",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Create a new internal/config package that owns the YAML settings file (the ONE permitted settings sidecar, distinct from the forbidden catalog index). It must read/write a {store: <abs path>} file, resolve the config file location (XDG_CONFIG_HOME, SKILLDOZER_CONFIG override), and resolve the default store location (XDG_DATA_HOME, hand-computed since there is no os.UserDataDir). Depends on nothing internal; both skillsdir (M1.T2) and main/init (M2) consume it.",
               "subtasks": [
                 {
@@ -41,7 +41,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S2",
                   "title": "config.Path() + config.DefaultStore() — XDG-aware config-file path and default store dir",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1"
@@ -67,7 +67,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Add SourceConfig enum value + 'config file' label + refresh doc comments + export HasSkillMD",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/code_prd_delta.md G2/G3/G12/G14 and the current Source enum at internal/skillsdir/skillsdir.go:25-52 (SourceEnv=0, SourceSibling, SourceWalkUp). hasSkillMD is at skillsdir.go:139-166, currently unexported. Insert SourceConfig between SourceEnv and SourceSibling so iota order tracks priority order.\n2. INPUT: None (type/enum/doc changes only).\n3. LOGIC: (a) Add `SourceConfig` to the const block immediately after SourceEnv (so the values are Env=0, Config=1, Sibling=2, WalkUp=3). (b) Add `case SourceConfig: return \"config file\"` to Source.String() (PRD §8.3 enumerates exactly four labels: SKILLDOZER_SKILLS_DIR, config file, sibling of binary, ancestor of cwd). (c) Update the package doc comment (skillsdir.go:3-7) and the Find() doc comment (skillsdir.go:218-231) from '3 rules' to the 5-rule ladder env -> config -> sibling -> walk-up -> unconfigured-hint. (d) Export the cwd-auto-detect predicate: rename the existing `hasSkillMD` to `HasSkillMD` (exported) and update its single internal caller findWalkUpAncestor — OR add a thin exported `HasSkillMD` that delegates to the existing private fn; either way the public symbol `HasSkillMD(dir string) bool` must exist for P1.M2.T2.S1 (init cwd-detect) to consume.\n4. OUTPUT: Exported `skillsdir.SourceConfig` and `skillsdir.HasSkillMD`; refreshed doc comments; the 'config file' label. Consumed by P1.M1.T2.S2 (Find uses SourceConfig) and P1.M2.T2.S1 (init uses HasSkillMD). Update skillsdir_test.go TestSourceString to assert {SourceConfig, \"config file\"}.\n5. DOCS: none — no user-facing surface (the --path stderr label is surfaced by main.go unchanged once Source.String() returns it; that behavior already exists at main.go:421).",

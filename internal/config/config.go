@@ -15,6 +15,16 @@
 // so the file can gain fields without breaking older binaries. "Lenient" means
 // ignore unknown KEYS, NOT tolerate syntactically broken YAML — corrupt input is
 // returned as a hard error. This matches internal/discover's convention exactly.
+//
+// Path resolution for the settings file and the default skills store is also
+// here. Path resolves the config-file location per PRD §8.1 ($XDG_CONFIG_HOME/
+// skilldozer/config.yaml, with a $SKILLDOZER_CONFIG override taken as a literal
+// path). DefaultStore resolves the out-of-the-box skills directory per PRD
+// §8.2/§8.3 ($XDG_DATA_HOME/skilldozer/skills, falling back to ~/.local/share/
+// skilldozer/skills). Both are pure functions of the environment: they read env
+// vars and compute a path, they do NOT touch the filesystem (existence is a
+// findConfig/init concern). Locating the file and the default store is squarely
+// within the "where does this live" remit of a settings sidecar.
 package config
 
 import (
@@ -79,4 +89,71 @@ func Save(path string, f File) error {
 		return err
 	}
 	return os.WriteFile(path, out, 0o644)
+}
+
+// configEnv is the environment variable that overrides the config-file location
+// (PRD §8.1). Set to an absolute or relative path to redirect skilldozer at a
+// different config file (useful for tests / multiple profiles). It is read by
+// Path; a non-empty value is taken as the literal config-file path (cleaned
+// lexically, NOT joined to the config home). Package-internal: no consumer needs
+// the symbol — Path encapsulates the read. (Mirrors skillsdir's envVar style.)
+const configEnv = "SKILLDOZER_CONFIG"
+
+// Path returns the path to the skilldozer config file (PRD §8.1 — "the one
+// fixed, well-known path the binary can bootstrap from"). It is a pure function
+// of the environment and reads no filesystem state.
+//
+// Resolution order:
+//
+//  1. $SKILLDOZER_CONFIG, if non-empty, is the literal config-file path: returned
+//     AS-IS after filepath.Clean (lexical .. / trailing-slash cleanup only; no
+//     symlink evaluation). Absolute AND relative values both work — the override
+//     is NOT joined to the config home, so a relative value is usable for tests /
+//     multiple profiles. (Empty == unset: os.Getenv returns "" for both, and the
+//     "" guard means an empty override falls through to the XDG default rather
+//     than producing filepath.Clean("") == ".".)
+//  2. Otherwise $XDG_CONFIG_HOME/skilldozer/config.yaml, where the XDG config
+//     home is os.UserConfigDir() (which honors $XDG_CONFIG_HOME, falls back to
+//     ~/.config, and rejects a relative $XDG_CONFIG_HOME with a non-nil error).
+//
+// Any error from os.UserConfigDir (a relative $XDG_CONFIG_HOME, or neither
+// $XDG_CONFIG_HOME nor $HOME defined) is returned VERBATIM, not wrapped:
+// findConfig treats any Path error as "config unavailable -> fall through to the
+// next §8.3 rule" and never inspects the error type.
+func Path() (string, error) {
+	if v := os.Getenv(configEnv); v != "" {
+		return filepath.Clean(v), nil
+	}
+	configHome, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configHome, "skilldozer", "config.yaml"), nil
+}
+
+// DefaultStore returns the default skills store directory (PRD §8.2 / §8.3).
+// It is a pure function of the environment and reads no filesystem state.
+//
+// Resolution order:
+//
+//  1. $XDG_DATA_HOME, if set AND absolute, is the base: $XDG_DATA_HOME/skilldozer/
+//     skills. (A relative $XDG_DATA_HOME is INVALID per the XDG spec and is
+//     ignored — guarded by filepath.IsAbs — so a misconfigured value never
+//     produces a relative store path.)
+//  2. Otherwise ~/.local/share/skilldozer/skills, where ~ is os.UserHomeDir().
+//     There is no os.UserDataDir(), so the XDG data-home rule is computed by
+//     hand, exactly as external_deps.md §2 prescribes.
+//
+// Any error from os.UserHomeDir ($HOME unset) is returned VERBATIM, not wrapped.
+// This is the value init (P1.M2.T2) offers as the out-of-the-box store when no
+// SKILLDOZER_SKILLS_DIR env var is set, so a go install user gets a sane default.
+func DefaultStore() (string, error) {
+	if v := os.Getenv("XDG_DATA_HOME"); v != "" && filepath.IsAbs(v) {
+		return filepath.Join(v, "skilldozer", "skills"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "share", "skilldozer", "skills"), nil
 }

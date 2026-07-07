@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -135,5 +136,148 @@ func TestFileStoreTagIsExact(t *testing.T) {
 	}
 	if string(set) != "store: /s\n" {
 		t.Errorf("File{Store:/s} marshaled to %q; want \"store: /s\\n\"", string(set))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Path / DefaultStore tests (P1.M1.T1.S2).
+//
+// Every test below mutates process env via t.Setenv, so NONE may call
+// t.Parallel (mirrors internal/skillsdir/skillsdir_test.go). t.Setenv cannot
+// unset, but Path/DefaultStore use os.Getenv + `!=""`, so t.Setenv(var, "")
+// correctly simulates "unset" for these two functions (empty == unset).
+// Path/DefaultStore read ONLY env vars (no filesystem), so no temp FILES are
+// needed — t.TempDir() is used only to obtain controlled ABSOLUTE env values.
+// ---------------------------------------------------------------------------
+
+// Path: a non-empty SKILLDOZER_CONFIG override is returned filepath.Clean'd,
+// honored over $XDG_CONFIG_HOME. Proves the override branch wins.
+func TestPathSkilldozerConfigAbsoluteOverride(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates SKILLDOZER_CONFIG / XDG_CONFIG_HOME.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // prove override WINS over XDG
+	t.Setenv(configEnv, "/abs/path/to/cfg.yaml")
+	got, err := Path()
+	if err != nil {
+		t.Fatalf("Path() override abs: err=%v; want nil", err)
+	}
+	if want := filepath.Clean("/abs/path/to/cfg.yaml"); got != want {
+		t.Errorf("Path() override abs: got=%q; want %q", got, want)
+	}
+}
+
+// Path: a RELATIVE SKILLDOZER_CONFIG override is returned AS-IS (cleaned), NOT
+// joined to the config home. This is THE critical no-join test (PRD §8.1 "useful
+// for tests / multiple profiles"). Asserts the result is relative and contains
+// no "skilldozer" segment, proving it never touched the XDG default.
+func TestPathSkilldozerConfigRelativeOverrideNotJoined(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates SKILLDOZER_CONFIG / XDG_CONFIG_HOME.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(configEnv, "rel/sub/cfg.yaml")
+	got, err := Path()
+	if err != nil {
+		t.Fatalf("Path() override rel: err=%v; want nil", err)
+	}
+	if want := filepath.Clean("rel/sub/cfg.yaml"); got != want {
+		t.Errorf("Path() override rel: got=%q; want %q", got, want)
+	}
+	if filepath.IsAbs(got) {
+		t.Errorf("Path() override rel: got=%q is absolute; must stay relative (NOT joined to configHome)", got)
+	}
+	if strings.Contains(got, "skilldozer") {
+		t.Errorf("Path() override rel: got=%q contains \"skilldozer\"; override must NOT be joined to the XDG default", got)
+	}
+}
+
+// Path: an EMPTY SKILLDOZER_CONFIG is equivalent to unset (os.Getenv returns
+// "" for both, and the `!=""` guard treats them the same), so Path falls
+// through to the os.UserConfigDir() default honoring $XDG_CONFIG_HOME.
+func TestPathSkilldozerConfigEmptyFallsToXDG(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates SKILLDOZER_CONFIG / XDG_CONFIG_HOME.
+	t.Setenv(configEnv, "") // empty == unset
+	xdg := t.TempDir()      // controlled absolute config home
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	got, err := Path()
+	if err != nil {
+		t.Fatalf("Path() empty override: err=%v; want nil", err)
+	}
+	if want := filepath.Join(xdg, "skilldozer", "config.yaml"); got != want {
+		t.Errorf("Path() empty override: got=%q; want %q", got, want)
+	}
+}
+
+// Path: a relative $XDG_CONFIG_HOME is rejected by os.UserConfigDir() with a
+// non-nil error, and Path propagates it verbatim with an empty path. Asserts
+// only err != nil (the stdlib error wording is not part of the contract).
+func TestPathRejectsRelativeXDGConfigHome(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates SKILLDOZER_CONFIG / XDG_CONFIG_HOME.
+	t.Setenv(configEnv, "") // ensure the override does not short-circuit
+	t.Setenv("XDG_CONFIG_HOME", "relative/not-abs")
+	got, err := Path()
+	if err == nil {
+		t.Fatalf("Path() relative XDG_CONFIG_HOME: err=nil; want a non-nil error from os.UserConfigDir")
+	}
+	if got != "" {
+		t.Errorf("Path() relative XDG_CONFIG_HOME: got=%q; want \"\" on error", got)
+	}
+}
+
+// DefaultStore: an absolute $XDG_DATA_HOME is honored as the base dir.
+func TestDefaultStoreAbsoluteXDGDataHome(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates XDG_DATA_HOME.
+	t.Setenv("XDG_DATA_HOME", "/abs/data")
+	got, err := DefaultStore()
+	if err != nil {
+		t.Fatalf("DefaultStore() abs XDG_DATA_HOME: err=%v; want nil", err)
+	}
+	if want := filepath.Join("/abs/data", "skilldozer", "skills"); got != want {
+		t.Errorf("DefaultStore() abs XDG_DATA_HOME: got=%q; want %q", got, want)
+	}
+}
+
+// DefaultStore: an EMPTY $XDG_DATA_HOME falls through to ~/.local/share.
+func TestDefaultStoreEmptyXDGDataHomeFallsToHome(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates XDG_DATA_HOME / HOME.
+	t.Setenv("XDG_DATA_HOME", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got, err := DefaultStore()
+	if err != nil {
+		t.Fatalf("DefaultStore() empty XDG_DATA_HOME: err=%v; want nil", err)
+	}
+	if want := filepath.Join(home, ".local", "share", "skilldozer", "skills"); got != want {
+		t.Errorf("DefaultStore() empty XDG_DATA_HOME: got=%q; want %q", got, want)
+	}
+}
+
+// DefaultStore: a RELATIVE $XDG_DATA_HOME is invalid per the XDG spec and is
+// IGNORED — the function falls back to ~/.local/share rather than producing a
+// relative store path.
+func TestDefaultStoreRelativeXDGDataHomeIgnored(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates XDG_DATA_HOME / HOME.
+	t.Setenv("XDG_DATA_HOME", "relative/data") // relative -> invalid -> ignored
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got, err := DefaultStore()
+	if err != nil {
+		t.Fatalf("DefaultStore() relative XDG_DATA_HOME: err=%v; want nil", err)
+	}
+	if want := filepath.Join(home, ".local", "share", "skilldozer", "skills"); got != want {
+		t.Errorf("DefaultStore() relative XDG_DATA_HOME: got=%q; want %q (must fall back to ~/.local/share)", got, want)
+	}
+}
+
+// DefaultStore: an unset/empty $HOME makes os.UserHomeDir() error, and
+// DefaultStore propagates it verbatim with an empty path. (Linux-specific;
+// PRD targets Linux.) Asserts only err != nil.
+func TestDefaultStoreHomeUnsetErrors(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates XDG_DATA_HOME / HOME.
+	t.Setenv("XDG_DATA_HOME", "") // force the HOME fallback branch
+	t.Setenv("HOME", "")          // os.UserHomeDir -> error
+	got, err := DefaultStore()
+	if err == nil {
+		t.Fatalf("DefaultStore() HOME unset: err=nil; want a non-nil error from os.UserHomeDir")
+	}
+	if got != "" {
+		t.Errorf("DefaultStore() HOME unset: got=%q; want \"\" on error", got)
 	}
 }
