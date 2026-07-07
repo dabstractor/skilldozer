@@ -467,14 +467,14 @@
               "type": "Task",
               "id": "P1.M6.T14",
               "title": "README.md (full §15 outline)",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Write the user-facing README mirroring mcpeepants tone/structure, following the PRD §15 outline: title+one-liner, why, install (install.sh / go install + SKPP_SKILLS_DIR caveat / from-source), usage (canonical pi --skill example, multi-skill, -f, --list, --search, --all, check, --path), where skills live, adding a skill, how skpp finds the store, constraints.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M6.T14.S1",
                   "title": "README.md per §15 outline (mcpeepants tone)",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M6.T13.S1",
