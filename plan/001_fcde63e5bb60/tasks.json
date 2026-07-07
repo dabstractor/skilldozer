@@ -440,14 +440,14 @@
               "type": "Task",
               "id": "P1.M6.T13",
               "title": "install.sh — build + symlink into PATH (§12.1)",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Create install.sh that builds the binary with version ldflags and SYMLINKS (not copies) it into a target bin dir, ensuring os.Executable() resolves back to the repo so the sibling-of-binary rule finds skills/. Also handles PATH advice and prints a verification command.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M6.T13.S1",
                   "title": "install.sh: build + symlink + target selection + PATH advice + verify",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M5.T11.S1"
