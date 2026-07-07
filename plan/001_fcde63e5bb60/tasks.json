@@ -236,14 +236,14 @@
               "type": "Task",
               "id": "P1.M3.T7",
               "title": "internal/resolve — §7.2 precedence resolver",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Pure resolution logic: given a tag and the skill index, apply the first-match-wins precedence (exact canonical relTag -> basename -> frontmatter name -> declared alias) and return the matched skill or a typed error (Unknown / Ambiguous with candidate tags).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T7.S1",
                   "title": "Resolve() + Result/MatchKind + Unknown/Ambiguous errors",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T5.S1"
