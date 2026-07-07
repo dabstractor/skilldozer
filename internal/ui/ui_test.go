@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/dabstractor/skpp/internal/discover"
 )
@@ -22,6 +23,20 @@ func colOf(out, substr string) int {
 		return -1
 	}
 	return idx - (strings.LastIndex(out[:idx], "\n") + 1)
+}
+
+// runeCol returns the RUNE column (display column under the width-1-rune model)
+// of substr's first occurrence within its line in out. Unlike colOf (byte offset),
+// this counts runes so it reflects VISUAL alignment for multi-byte cells: byte
+// padding yields uniform byte widths even when the display is misaligned, so a
+// byte check is blind to the very bug displayWidth fixes (verified_facts §4).
+func runeCol(out, substr string) int {
+	idx := strings.Index(out, substr)
+	if idx < 0 {
+		return -1
+	}
+	lineStart := strings.LastIndex(out[:idx], "\n") + 1
+	return utf8.RuneCountInString(out[lineStart:idx])
 }
 
 func TestPrintListEmptyPrintsNothing(t *testing.T) {
@@ -172,5 +187,89 @@ func TestPrintListColumnsAlignedAcrossRows(t *testing.T) {
 	nameCol := colOf(out, "NAME")
 	if c := colOf(out, "alpha"); c != nameCol {
 		t.Errorf("'alpha' at col %d; want %d:\n%s", c, nameCol, out)
+	}
+}
+
+// TestDisplayWidth: rune count is the display-width approximation (not byte len).
+func TestDisplayWidth(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"café", 4},  // 5 bytes, 4 runes
+		{"—", 1},     // 3 bytes, 1 rune
+		{"a—b", 3},   // 5 bytes, 3 runes
+		{"ascii", 5}, // byte == rune for ASCII
+		{"", 0},
+	}
+	for _, c := range cases {
+		if got := displayWidth(c.in); got != c.want {
+			t.Errorf("displayWidth(%q)=%d; want %d (bytes=%d)", c.in, got, c.want, len(c.in))
+		}
+	}
+}
+
+// TestPadRightMultibyte: padding is measured in RUNES, so a multi-byte string is
+// padded by (n - runeCount) spaces. With the byte-length bug, padRight("café",5)
+// returns "café" (0 spaces) because len("café")==5>=5.
+func TestPadRightMultibyte(t *testing.T) {
+	cases := []struct {
+		s    string
+		n    int
+		want string
+	}{
+		{"café", 5, "café "},  // 1 space (5 - 4 runes)
+		{"éé", 4, "éé  "},     // 2 spaces (4 - 2 runes)
+		{"ascii", 3, "ascii"}, // already wider -> no truncation
+		{"", 3, "   "},        // empty -> all padding
+	}
+	for _, c := range cases {
+		if got := padRight(c.s, c.n); got != c.want {
+			t.Errorf("padRight(%q,%d)=%q; want %q", c.s, c.n, got, c.want)
+		}
+	}
+}
+
+// TestWrapWordsMultibyte: wrapping measures RUNE width, so "café bar" fits in 8
+// columns (4+1+3=8). With the byte-length bug, len("café")==5 makes 5+1+3=9>8 and
+// it wrongly breaks into two lines.
+func TestWrapWordsMultibyte(t *testing.T) {
+	lines := wrapWords("café bar", 8)
+	if len(lines) != 1 || lines[0] != "café bar" {
+		t.Errorf("wrapWords(\"café bar\",8)=%v; want [\"café bar\"] (1 line, rune width)", lines)
+	}
+}
+
+// TestPrintListColumnsAlignedForMultibyte: a multi-byte TAG (café: 4 runes/5
+// bytes) and a multi-byte DESCRIPTION (—) must NOT shift the row's columns. Every
+// description starts at the same DISPLAY column as the DESCRIPTION header.
+//
+// NOTE: this uses runeCol (rune offset), NOT the existing colOf (byte offset) —
+// byte offsets are uniform under byte-padding (blind to the bug) and actually
+// DIFFER under rune-padding (a rune-padded café cell is 6 bytes vs ascii's 5), so
+// a byte check would pass with the bug and fail after the fix. See verified_facts §4.
+func TestPrintListColumnsAlignedForMultibyte(t *testing.T) {
+	var buf bytes.Buffer
+	PrintList(&buf, []discover.Skill{
+		mk("café", "cafe-name", "café — skill", true),
+		mk("ascii", "ascii-name", "ascii skill", true),
+	}, false)
+	out := buf.String()
+
+	descCol := runeCol(out, "DESCRIPTION")
+	if descCol < 0 {
+		t.Fatalf("no DESCRIPTION header:\n%s", out)
+	}
+	// Every description starts at the same DISPLAY column as the header. With the
+	// byte-width bug, the café row's description lands one column early.
+	for _, want := range []string{"café — skill", "ascii skill"} {
+		if c := runeCol(out, want); c != descCol {
+			t.Errorf("desc %q at display col %d; want %d (aligned under DESCRIPTION):\n%s", want, c, descCol, out)
+		}
+	}
+	// The NAME column is likewise aligned (and the multi-byte tag did not shift it).
+	nameCol := runeCol(out, "NAME")
+	if c := runeCol(out, "cafe-name"); c != nameCol {
+		t.Errorf("'cafe-name' at display col %d; want %d:\n%s", c, nameCol, out)
 	}
 }

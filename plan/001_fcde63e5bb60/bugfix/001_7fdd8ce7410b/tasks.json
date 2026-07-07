@@ -75,21 +75,21 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Unicode Table Alignment",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Resolve Issue 2 (Minor): the --list/--search table misaligns when tags or descriptions contain multi-byte UTF-8 characters. The root cause is byte-length (len()) used for column width in padRight, the width computation, and wrapWords. The fix uses the stdlib unicode/utf8 rune count — no new dependency, respecting the §4/§7.3 single-dependency policy.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "Fix unicode display width in ui table rendering",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Replace byte-length width calculations with a rune-count-based displayWidth helper across padRight, column-width computation, and wrapWords. Fix the false ASCII assumption comment.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "Implement rune-count displayWidth and fix padRight, wrapWords, column math, comment",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/issue_analysis.md §Issue 2 and decisions.md §D2. ui.go:132 padRight uses `len(s)` (byte length) — multi-byte UTF-8 runes (é=2 bytes, —=3 bytes) are under-counted, shifting columns left. Three sites use byte length: (a) padRight (ui.go:133 `if len(s) >= n` and ui.go:136 `n-len(s)`), (b) column-width computation (ui.go:79-82 `len(s.RelTag)` and `len(name)`), (c) wrapWords (ui.go:156 `len(cur)+1+len(word)`). The false ASCII comment is at ui.go:128-131. Key insight: RelTag and Name ARE charset-constrained (check.go validName regex enforces a-z0-9-), so byte==display for those today; Description is free-form prose with NO charset restriction (only length-checked) and is the realistic misalignment vector.\n2. INPUT: No new types. Import `unicode/utf8` (Go stdlib, zero new dependencies — respects PRD §4/§7.3).\n3. LOGIC: Add a package-level helper `func displayWidth(s string) int { return utf8.RuneCountInString(s) }`. Replace every `len(s)` used for DISPLAY width with `displayWidth(s)` at the three sites: (a) padRight body — `if displayWidth(s) >= n { return s }` and `return s + strings.Repeat(\" \", n-displayWidth(s))`; (b) column-width loop — `if displayWidth(s.RelTag) > tagW` and `if displayWidth(name) > nameW`; (c) wrapWords — `case displayWidth(cur)+1+displayWidth(word) <= width`. Fix the comment at ui.go:128-131 to state that width is rune-count-based (handles common multi-byte runes like é, —, smart quotes) and note the known limitation that wide CJK runes (display width 2) are not fully handled (would need a width table, deliberately avoided per §4/§7.3 dependency policy). Do NOT change the paint-before-color invariant (ui.go:88-92) — color escape bytes must stay out of width math.\n4. OUTPUT: Tables align correctly for multi-byte tags and descriptions. ASCII-only output is unchanged (rune count == byte count for ASCII).\n5. TESTS (implied TDD): ADD ui_test.go test using a skill with a multi-byte tag (e.g. \"café\") and/or a multi-byte description (e.g. containing \"—\" or \"é\") and assert column alignment via the existing colOf() helper — every row's DESCRIPTION column must start at the same byte offset. TestPrintListColumnsAlignedAcrossRows (ui_test.go:153, ASCII-only) must still pass unchanged.\n6. DOCS: [Mode A] none — internal formatting fix, no user-facing/config/API surface change.",
@@ -114,14 +114,14 @@
               "type": "Task",
               "id": "P1.M4.T1",
               "title": "Support combined short flags and --flag=value syntax",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Normalize argv tokens in parseArgs before the exact-match switch so that --flag=value and -abc (combined short bool flags) are accepted. The short flag set is v h p l a f s; only -s/--search takes a value.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T1.S1",
                   "title": "Normalize tokens in parseArgs before the switch",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/issue_analysis.md §Issue 5 and decisions.md §D5. main.go:145 parseArgs uses `switch a` (main.go:152) that matches exact whole tokens only. `-vh` does not match `case \"-v\"`; `--version=x` does not match `case \"--version\"` → both fall to the default branch → captured as unknownFlag → exit 2 (main.go:194-198). The short flag set with single-dash forms is: v (--version), h (--help), p (--path), l (--list), a (--all), f (--file), s (--search). --relative and --no-color are LONG-ONLY (no short alias, cannot appear in a bundle). Only --search/-s is value-taking.\n2. INPUT: The existing parseArgs function and config struct. No new fields.\n3. LOGIC: At the TOP of the parseArgs for-loop body (before `switch a`), normalize the token `a` into a canonical form: (a) LONG FLAGS with `=`: if `a` starts with `--` and contains `=`, split into flag and value parts. Map the flag part to its case (e.g. `--search` → set searchMode=true and searchQ=value; `--version` → set version=true, ignore the value for bool flags). (b) SHORT BUNDLES: if `a` starts with single `-` (not `--`), has length > 2, and every char is a known short bool flag (v/h/p/l/a/f), expand: set each corresponding config field to true. If the bundle contains `s` (the value-taking short flag), `s` must be LAST in the bundle and the remainder after `s` (or the next arg) is the search query (e.g. `-sfoo` → search \"foo\", `-ls foo` → list=true AND search \"foo\"). An unknown char in a bundle → unknownFlag. (c) The `check` positional token and bare tags (no leading `-`) pass through unchanged to the existing default branch.\n4. OUTPUT: `-vh`, `-pl`, `--version=x`, `--search=foo`, `-sfoo` all work. Existing exact-token forms (`--version`, `-v`, `--search foo`) still work unchanged. Unknown flags still exit 2.\n5. TESTS (implied TDD): ADD main_test.go tests: parseArgs([\"-vh\"]) → version=true, help=true; parseArgs([\"--path=/x\"]) → path=true (value ignored for bool); parseArgs([\"--search=foo\"]) → searchMode=true, searchQ=\"foo\"; parseArgs([\"-sfoo\"]) → searchMode=true, searchQ=\"foo\"; parseArgs([\"-af\"]) → all=true, file=true. Verify unknown char in bundle (e.g. `-vz`) sets unknownFlag. Existing parseArgs tests (TestParseArgs*) must still pass.\n6. DOCS: [Mode A] none — the flags themselves do not change (no new flag surface); only how they are parsed. The usageText already lists the short forms.",

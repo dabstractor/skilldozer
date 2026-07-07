@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/dabstractor/skpp/internal/discover"
 )
@@ -75,11 +76,11 @@ func PrintList(w io.Writer, skills []discover.Skill, useColor bool) {
 		if !s.HasFM || desc == "" {
 			desc = "(missing)"
 		}
-		if len(s.RelTag) > tagW {
-			tagW = len(s.RelTag)
+		if displayWidth(s.RelTag) > tagW {
+			tagW = displayWidth(s.RelTag)
 		}
-		if len(name) > nameW {
-			nameW = len(name)
+		if displayWidth(name) > nameW {
+			nameW = displayWidth(name)
 		}
 		rows[i] = cells{s.RelTag, name, desc}
 	}
@@ -125,15 +126,29 @@ func PrintList(w io.Writer, skills []discover.Skill, useColor bool) {
 	}
 }
 
-// padRight returns s right-padded with spaces to width n. If len(s) >= n, s is
-// returned unchanged (no truncation). Operates on byte length, which is correct
-// for the ASCII values skpp handles (Agent Skills names are lowercase a-z0-9-;
-// tags are relative dir paths of the same).
+// displayWidth returns the number of display columns s occupies, approximated as
+// its UTF-8 rune count. It replaces len(s) wherever a string's rendered width
+// matters (column sizing, padding, word-wrap) so a multi-byte rune like é (2
+// bytes, 1 rune) or — (3 bytes, 1 rune) counts as one column instead of 2–4 bytes.
+// KNOWN LIMITATION: wide CJK runes that render two cells wide are still counted
+// as one; a full East-Asian width table would be needed for that, deliberately
+// avoided to keep skpp dependency-free (PRD §4/§7.3). See padRight for usage.
+func displayWidth(s string) int {
+	return utf8.RuneCountInString(s)
+}
+
+// padRight returns s right-padded with spaces to display width n. If s is already
+// n or more columns wide it is returned unchanged (no truncation). Width is
+// measured in RUNES via displayWidth (utf8.RuneCountInString), not bytes: a
+// multi-byte rune like é (2 bytes, 1 column) or — (3 bytes, 1 column) renders one
+// cell wide, so rune count gives correct padding for the common case (é, —, smart
+// quotes, single-cell emoji). Applied to PLAIN text before paint so ANSI color
+// escapes stay out of the width math (their bytes would otherwise corrupt padding).
 func padRight(s string, n int) string {
-	if len(s) >= n {
+	if displayWidth(s) >= n {
 		return s
 	}
-	return s + strings.Repeat(" ", n-len(s))
+	return s + strings.Repeat(" ", n-displayWidth(s))
 }
 
 // wrapWords word-wraps s into lines of at most width characters, breaking at
@@ -151,7 +166,7 @@ func wrapWords(s string, width int) []string {
 		switch {
 		case cur == "":
 			cur = word
-		case len(cur)+1+len(word) <= width:
+		case displayWidth(cur)+1+displayWidth(word) <= width:
 			cur += " " + word
 		default:
 			lines = append(lines, cur)
