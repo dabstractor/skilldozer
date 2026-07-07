@@ -21,6 +21,7 @@ import (
 
 	"github.com/dabstractor/skpp/internal/discover"
 	"github.com/dabstractor/skpp/internal/resolve"
+	"github.com/dabstractor/skpp/internal/search"
 	"github.com/dabstractor/skpp/internal/skillsdir"
 	"github.com/dabstractor/skpp/internal/ui"
 )
@@ -68,16 +69,18 @@ func main() {
 // tags, and the S2 modifiers all/file/relative; every other token is a tolerated
 // no-op (P1.M5.T11 turns unknown flags into exit 2 and adds subcommand handling).
 type config struct {
-	version  bool     // --version / -v : print "skpp <version>" and exit 0
-	path     bool     // --path / -p    : print resolved skills dir and exit 0/1
-	list     bool     // --list / -l    : print the human-readable catalog table (§6.1)
-	all      bool     // --all / -a     : print every skill's directory path, one per line (§6.1) [NEW]
-	file     bool     // --file / -f    : print the SKILL.md path instead of the dir path (§6.2) [NEW]
-	relative bool     // --relative     : print paths relative to the skills dir, not absolute (§6.2) [NEW]
-	noColor  bool     // --no-color     : disable ANSI color even on a TTY (§6.2)
-	tags     []string // positional <tag> args (PRD §6.1 `skpp <tag> [<tag>...]`); resolved in run
-	// Future (M4/M5), do NOT add yet:
-	//   search string; check bool; help bool
+	version    bool     // --version / -v : print "skpp <version>" and exit 0
+	path       bool     // --path / -p    : print resolved skills dir and exit 0/1
+	list       bool     // --list / -l    : print the human-readable catalog table (§6.1)
+	all        bool     // --all / -a     : print every skill's directory path, one per line (§6.1) [NEW]
+	file       bool     // --file / -f    : print the SKILL.md path instead of the dir path (§6.2) [NEW]
+	relative   bool     // --relative     : print paths relative to the skills dir, not absolute (§6.2) [NEW]
+	noColor    bool     // --no-color     : disable ANSI color even on a TTY (§6.2)
+	tags       []string // positional <tag> args (PRD §6.1 `skpp <tag> [<tag>...]`); resolved in run
+	searchMode bool     // --search <q>/-s : substring search over tag/name/description/keywords (§6.1) [NEW]
+	searchQ    string   // the --search query value (consumed from the token after --search/-s) [NEW]
+	// Future (M5), do NOT add yet:
+	//   check bool; help bool
 }
 
 // parseArgs scans argv tokens and fills a config. Flags may appear in any order
@@ -89,7 +92,11 @@ type config struct {
 // true` (or capture the next arg for value-taking flags like --search <q>).
 func parseArgs(args []string) config {
 	var c config
-	for _, a := range args {
+	// Index-based loop (not range) so a value-taking flag (--search <q>) can
+	// CONSUME the following token via i++ without it also being captured as a tag.
+	// PRD §6.1/§6.2: --search/-s take exactly one value; every other flag is a bool.
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		switch a {
 		case "--version", "-v":
 			c.version = true
@@ -105,6 +112,18 @@ func parseArgs(args []string) config {
 			c.relative = true
 		case "--no-color":
 			c.noColor = true
+		case "--search", "-s":
+			// Value-taking flag: consume the NEXT token verbatim as the query. The
+			// value is NOT appended to c.tags (i++ skips it). If --search is the
+			// LAST token (no value follows) searchMode stays false and the call
+			// falls through to the no-recognized-mode default (exit 1); the proper
+			// "flag requires an argument" exit-2 is P1.M5.T11. A value starting with
+			// '-' (e.g. `--search -x`) is grabbed as the literal query "-x".
+			if i+1 < len(args) {
+				c.searchMode = true
+				c.searchQ = args[i+1]
+				i++
+			}
 		default:
 			// Positional <tag> (PRD §6.1 `skpp <tag> [<tag>...]`): a token that
 			// does NOT start with '-' is a tag, captured here and resolved in run.
@@ -182,6 +201,37 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// NOT apply to it (PRD §6.2 header: modifiers combine with tag resolution
 		// or --all).
 		ui.PrintList(stdout, skills, isTerminal(stdout) && !c.noColor)
+		return 0
+	}
+
+	// --search mode: `skpp --search <q>` / `-s <q>` (PRD §6.1). Filters the index to
+	// skills where <q> is a case-insensitive substring of the tag, frontmatter name,
+	// description, or any metadata keyword (internal/search), then renders the SAME
+	// table as --list via ui.PrintList (PRD §6.1: "same table format as --list,
+	// filtered"). The filtered slice keeps discover.Index's RelTag sort. Exit 0 with
+	// the table on matches; exit 1 (stderr message, EMPTY stdout) when nothing
+	// matches (PRD §6.1: "1 if no matches"). --no-color / TTY color gating is shared
+	// with --list; --file/--relative do NOT apply (search prints a TABLE, not paths —
+	// PRD §6.2: modifiers combine with tag/--all only).
+	if c.searchMode {
+		dir, _, err := skillsdir.Find()
+		if err != nil {
+			fmt.Fprintln(stderr, err) // one-line fix (PRD §6.4/§8); stdout stays empty
+			return 1
+		}
+		skills, err := discover.Index(dir)
+		if err != nil {
+			fmt.Fprintln(stderr, err) // e.g. skills dir vanished between Find and Index
+			return 1
+		}
+		matched := search.Search(c.searchQ, skills)
+		if len(matched) == 0 {
+			// PRD §6.1: exit 1 "if no matches". Mirror --list's "no skills found"
+			// convention: message to stderr, stdout stays clean.
+			fmt.Fprintln(stderr, "no skills matched "+c.searchQ)
+			return 1
+		}
+		ui.PrintList(stdout, matched, isTerminal(stdout) && !c.noColor)
 		return 0
 	}
 

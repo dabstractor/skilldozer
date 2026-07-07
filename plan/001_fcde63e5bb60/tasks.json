@@ -316,14 +316,14 @@
               "type": "Task",
               "id": "P1.M4.T9",
               "title": "--search (§6.1)",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Substring (case-insensitive) search over tag, frontmatter name, description, and metadata.keywords, reusing the --list table format. Exit 0 normally; exit 1 if no matches.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T9.S1",
                   "title": "Substring search over tag/name/description/keywords + ui reuse",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T6.S1"

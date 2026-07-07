@@ -818,3 +818,243 @@ func TestRunVersionPrecedenceOverAll(t *testing.T) {
 		t.Errorf("stdout=%q; want the version line (precedence over --all)", got)
 	}
 }
+
+// --- parseArgs: --search/-s value flag (P1.M4.T9.S1) ---
+
+// --search <q> sets searchMode=true and captures the query; the value is NOT a tag.
+func TestParseArgsSearchLong(t *testing.T) {
+	c := parseArgs([]string{"--search", "reddit"})
+	if !c.searchMode || c.searchQ != "reddit" {
+		t.Errorf("parseArgs(--search reddit): mode=%v q=%q; want true,reddit", c.searchMode, c.searchQ)
+	}
+	if len(c.tags) != 0 {
+		t.Errorf("--search value leaked into tags: %v", c.tags)
+	}
+}
+
+// -s <q> short form behaves identically.
+func TestParseArgsSearchShort(t *testing.T) {
+	c := parseArgs([]string{"-s", "reddit"})
+	if !c.searchMode || c.searchQ != "reddit" {
+		t.Errorf("parseArgs(-s reddit): mode=%v q=%q; want true,reddit", c.searchMode, c.searchQ)
+	}
+}
+
+// --search with NO following value (last token) -> searchMode stays false; falls
+// to the default exit-1 path. Proper exit-2 "needs an argument" is P1.M5.T11.
+func TestParseArgsSearchNoValueStaysInactive(t *testing.T) {
+	c := parseArgs([]string{"--search"})
+	if c.searchMode {
+		t.Errorf("parseArgs(--search) with no value: searchMode=true; want false (no value consumed)")
+	}
+}
+
+// --search consumes exactly ONE value; a following positional is captured as a tag.
+// (Mixing search mode + a tag is an M5.T11 exclusivity error; for now searchMode
+// wins in run() dispatch and tags are ignored.)
+func TestParseArgsSearchConsumesOneValue(t *testing.T) {
+	c := parseArgs([]string{"--search", "q", "sometag"})
+	if !c.searchMode || c.searchQ != "q" {
+		t.Errorf("search not captured: mode=%v q=%q", c.searchMode, c.searchQ)
+	}
+	if len(c.tags) != 1 || c.tags[0] != "sometag" {
+		t.Errorf("tags=%v; want [sometag] (the token after the search value)", c.tags)
+	}
+}
+
+// --- run: --search / -s (P1.M4.T9.S1) ---
+
+// --search success: a query matching a skill's tag prints the filtered table,
+// exit 0, no ANSI (non-TTY buffer). sampleStore has example + writing/reddit.
+func TestRunSearchMatchByTag(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "example"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--search example): code=%d; want 0", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "example") {
+		t.Errorf("stdout missing 'example' row:\n%s", got)
+	}
+	if strings.Contains(got, "reddit") { // unmatched skill must not leak
+		t.Errorf("unmatched skill 'reddit' leaked into search results:\n%s", got)
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("non-TTY search must not emit ANSI:\n%s", got)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr=%q; want empty", errOut.String())
+	}
+}
+
+func TestRunSearchShortFlag(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"-s", "reddit"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(-s reddit): code=%d; want 0", code)
+	}
+	if !strings.Contains(out.String(), "reddit") {
+		t.Errorf("stdout missing matched row:\n%s", out.String())
+	}
+}
+
+// --search is case-insensitive (PRD §6.1).
+func TestRunSearchCaseInsensitive(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "REDDIT"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--search REDDIT): code=%d; want 0 (case-insensitive)", code)
+	}
+	if !strings.Contains(out.String(), "reddit") {
+		t.Errorf("case-insensitive query should match:\n%s", out.String())
+	}
+}
+
+// --search matches by description (example has "A demo skill.").
+func TestRunSearchMatchByDescription(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "demo"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--search demo): code=%d; want 0", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "example") {
+		t.Errorf("description match should find example:\n%s", got)
+	}
+	if strings.Contains(got, "reddit") {
+		t.Errorf("non-matching reddit should be filtered out:\n%s", got)
+	}
+}
+
+// --search matches by frontmatter name (sampleStore reddit has name reddit-poster).
+func TestRunSearchMatchByName(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "poster"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--search poster): code=%d; want 0", code)
+	}
+	if !strings.Contains(out.String(), "reddit") {
+		t.Errorf("name match should find reddit skill:\n%s", out.String())
+	}
+}
+
+// --search matches by metadata.keywords (PRD §6.1).
+func TestRunSearchMatchByKeyword(t *testing.T) {
+	dir := writeSkillTree(t, map[string]string{
+		"example": "---\nname: example\ndescription: d\nmetadata:\n  keywords: [writing, social]\n---\nx\n",
+	})
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "soc"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--search soc): code=%d; want 0 (keyword match)", code)
+	}
+	if !strings.Contains(out.String(), "example") {
+		t.Errorf("keyword match should find example:\n%s", out.String())
+	}
+}
+
+// --search with NO matches -> exit 1, EMPTY stdout, message to stderr (PRD §6.1).
+func TestRunSearchNoMatchesExit1(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "zzznotfound"}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(--search zzznotfound): code=%d; want 1 (no matches)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY (PRD §6.1: no matches => nothing on stdout)", out.String())
+	}
+	if !strings.Contains(errOut.String(), "no skills matched") {
+		t.Errorf("stderr=%q; want a 'no skills matched' message", errOut.String())
+	}
+}
+
+// --search "" (empty query) matches ALL skills (substring semantics): exit 0, full
+// table — like --list. (PRD carves out no special case for an empty query.)
+func TestRunSearchEmptyQueryMatchesAll(t *testing.T) {
+	dir := sampleStore(t) // 2 skills
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", ""}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--search ''): code=%d; want 0 (empty matches all)", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "example") || !strings.Contains(got, "reddit") {
+		t.Errorf("empty query should list all skills:\n%s", got)
+	}
+}
+
+// --search respects --no-color: suppresses ANSI even on a TTY.
+func TestRunSearchNoColorSuppressesANSI(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	withTerminal(t, true)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "example", "--no-color"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--search example --no-color): code=%d; want 0", code)
+	}
+	if strings.Contains(out.String(), "\x1b[") {
+		t.Errorf("--no-color must suppress ANSI in search:\n%s", out.String())
+	}
+}
+
+// --search emits ANSI when stdout is a TTY and --no-color is absent.
+func TestRunSearchColorWhenTTY(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	withTerminal(t, true)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "example"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--search example) tty: code=%d; want 0", code)
+	}
+	got := out.String()
+	if !strings.Contains(got, "\x1b[1m") || !strings.Contains(got, "\x1b[36m") {
+		t.Errorf("TTY search output should contain ANSI bold/cyan:\n%s", got)
+	}
+}
+
+// --search when skills dir is unresolvable -> exit 1, empty stdout, one-line fix.
+func TestRunSearchSkillsDirUnresolvable(t *testing.T) {
+	unsetSkillsEnv(t)
+	t.Chdir(t.TempDir()) // all three §8 rules miss
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "x"}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(--search x) unresolvable: code=%d; want 1", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "SKPP_SKILLS_DIR") {
+		t.Errorf("stderr=%q; want the one-line fix", errOut.String())
+	}
+}
+
+// --version precedes --search (PRD §6.3).
+func TestRunVersionPrecedenceOverSearch(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--search", "example", "--version"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--search example --version): code=%d; want 0 (version precedence)", code)
+	}
+	if got := out.String(); got != "skpp "+version+"\n" {
+		t.Errorf("stdout=%q; want the version line (precedence over search)", got)
+	}
+}
