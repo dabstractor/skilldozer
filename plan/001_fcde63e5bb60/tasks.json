@@ -269,7 +269,7 @@
                   "type": "Subtask",
                   "id": "P1.M3.T8.S1",
                   "title": "skpp <tag> [...] output + §6.4 error contract (atomicity)",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T3.S1",

@@ -8,15 +8,17 @@
 // intentionally a small hand-rolled switch (not Go's `flag` package) so the full
 // §6 matrix — subcommands like `check`, positional <tag> args, long+short
 // aliases, and §6.3 mutual exclusivity — can be expressed cleanly. See
-// plan/001_fcde63e5bb60/P1M1.T3.S1/research/verified_facts.md §5.
+// plan/001_fcde63e5bb60/P1M1T3.S1/research/verified_facts.md §5.
 package main
 
 import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/dabstractor/skpp/internal/discover"
+	"github.com/dabstractor/skpp/internal/resolve"
 	"github.com/dabstractor/skpp/internal/skillsdir"
 	"github.com/dabstractor/skpp/internal/ui"
 )
@@ -60,22 +62,23 @@ func main() {
 }
 
 // config holds the parsed CLI flags. Grown by later milestones as more of the
-// PRD §6.1/§6.2 matrix lands. For this subtask version, path, list, and noColor
-// are set; every other token is a tolerated no-op (P1.M5.T11 turns unknown flags
-// into exit 2 and adds subcommand/positional handling).
+// PRD §6.1/§6.2 matrix lands. For this subtask version, path, list, noColor, and
+// tags are set; every other token is a tolerated no-op (P1.M5.T11 turns unknown
+// flags into exit 2 and adds subcommand handling).
 type config struct {
-	version bool // --version / -v : print "skpp <version>" and exit 0
-	path    bool // --path / -p    : print resolved skills dir and exit 0/1
-	list    bool // --list / -l    : print the human-readable catalog table (§6.1)
-	noColor bool // --no-color     : disable ANSI color even on a TTY (§6.2)
-	// Future (M3-M5), do NOT add yet:
-	//   all bool; search string; check bool; file, relative, help bool; tags []string
+	version bool     // --version / -v : print "skpp <version>" and exit 0
+	path    bool     // --path / -p    : print resolved skills dir and exit 0/1
+	list    bool     // --list / -l    : print the human-readable catalog table (§6.1)
+	noColor bool     // --no-color     : disable ANSI color even on a TTY (§6.2)
+	tags    []string // positional <tag> args (PRD §6.1 `skpp <tag> [<tag>...]`); resolved in run [NEW]
+	// Future (S2/M4/M5), do NOT add yet:
+	//   all bool; search string; check bool; file, relative, help bool
 }
 
 // parseArgs scans argv tokens and fills a config. Flags may appear in any order
 // (PRD §6). Long forms use POSIX double-dash; short forms a single dash. Unknown
-// tokens are tolerated for now (a no-op switch default); the full unknown-flag
-// -> exit 2 behavior and subcommand/positional parsing land in P1.M5.T11.
+// dashed flags are tolerated for now (a no-op in the default branch); the full
+// unknown-flag -> exit 2 behavior and §6.3 mutual-exclusivity land in P1.M5.T11.
 //
 // To add a flag in a later milestone: append a `case "--name", "-n": cfg.name =
 // true` (or capture the next arg for value-taking flags like --search <q>).
@@ -92,9 +95,15 @@ func parseArgs(args []string) config {
 		case "--no-color":
 			c.noColor = true
 		default:
-			// Unknown flag / subcommand / positional: tolerated for now.
-			// P1.M5.T11 implements: unknown flag -> exit 2 (§6.2),
-			// `check` subcommand dispatch, and <tag> positional capture.
+			// Positional <tag> (PRD §6.1 `skpp <tag> [<tag>...]`): a token that
+			// does NOT start with '-' is a tag, captured here and resolved in run.
+			// Dashed unknowns (e.g. --frobnicate) also fall through to this default
+			// and are tolerated (no-op); P1.M5.T11 turns them into exit 2 and adds
+			// §6.3 mutual-exclusivity (tag mixed with --list/--search/--all). The
+			// --file/--relative/--all modifiers land in P1.M3.T8.S2.
+			if !strings.HasPrefix(a, "-") {
+				c.tags = append(c.tags, a)
+			}
 		}
 	}
 	return c
@@ -105,9 +114,10 @@ func parseArgs(args []string) config {
 // injected so tests capture output via *bytes.Buffer instead of the real streams.
 //
 // Exit codes (PRD §6; this subtask's slice):
-//   - 0: --version printed; --path succeeded; --list printed the catalog
-//   - 1: --path/--list failed (skills dir unresolvable, or no skills for --list);
-//     default (no recognized flag)
+//   - 0: --version printed; --path succeeded; --list printed the catalog; all
+//     <tag>s resolved (one absolute path per line printed)
+//   - 1: --path/--list failed; ANY <tag> unresolved/ambiguous (nothing on stdout);
+//     skills dir unresolvable; default (no recognized flag)
 //   - 2: (DEFERRED to P1.M5.T11) unknown flag / mutually-exclusive modes mixed
 //
 // Precedence (PRD §6.3): --version (and, in M5, --help) win over everything.
@@ -159,6 +169,50 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// Color only when stdout is a TTY AND --no-color was not given (PRD §6.2).
 		// A *bytes.Buffer (tests) / pipe / file is not a TTY -> plain output.
 		ui.PrintList(stdout, skills, isTerminal(stdout) && !c.noColor)
+		return 0
+	}
+
+	// Tag-resolution mode: `skpp <tag> [<tag>...]` (PRD §6.1). Resolves each tag to
+	// its absolute skill dir path and prints one path per line, in input order.
+	//
+	// ATOMICITY (PRD §6.4 — the critical-for-$(...) contract): resolve EVERY tag
+	// first, buffering the resulting paths; if ANY tag fails (unknown/ambiguous),
+	// print one error line per problem tag to stderr, print NOTHING to stdout, and
+	// exit 1. The buffered paths are flushed ONLY when the whole invocation is
+	// known-good. This makes `pi --skill "$(skpp bad)"` fail loudly (empty $(),
+	// exit 1) instead of passing a partial or garbage path. Each error is printed
+	// verbatim from resolve's typed errors — UnknownError names the tag,
+	// AmbiguousError lists the candidate full tags (no "skpp:" prefix, matching the
+	// skillsdir.ErrNotFound convention used by --path/--list). The default output is
+	// the skill DIRECTORY path; --file/--relative modifiers land in P1.M3.T8.S2.
+	if len(c.tags) > 0 {
+		dir, _, err := skillsdir.Find()
+		if err != nil {
+			fmt.Fprintln(stderr, err) // one-line fix (PRD §6.4/§8); stdout stays empty
+			return 1
+		}
+		skills, err := discover.Index(dir)
+		if err != nil {
+			fmt.Fprintln(stderr, err) // e.g. skills dir vanished between Find and Index
+			return 1
+		}
+		paths := make([]string, 0, len(c.tags)) // buffered; flushed only if all resolve
+		hadErr := false
+		for _, tag := range c.tags {
+			res, rerr := resolve.Resolve(tag, skills)
+			if rerr != nil {
+				fmt.Fprintln(stderr, rerr) // one error line per problem tag (verbatim)
+				hadErr = true
+				continue
+			}
+			paths = append(paths, res.Skill.Dir) // absolute dir path (PRD §6.1 default)
+		}
+		if hadErr {
+			return 1 // paths buffered but never written → stdout empty (§6.4)
+		}
+		for _, p := range paths {
+			fmt.Fprintln(stdout, p) // one absolute path per line, input order
+		}
 		return 0
 	}
 

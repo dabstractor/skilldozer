@@ -92,10 +92,17 @@ func TestParseArgsAnyOrderBothForms(t *testing.T) {
 }
 
 // Unknown tokens are tolerated (no-op) for now; exit-2 lands in P1.M5.T11.
+// Dashed unknown flags are tolerated (no-op; exit-2 is M5). Non-dashed positional
+// tokens are now captured as <tag>s (so "sometag"/"check" land in c.tags rather
+// than being discarded). Only version/path stay false here.
 func TestParseArgsUnknownTolerated(t *testing.T) {
 	c := parseArgs([]string{"--frobnicate", "sometag", "check"})
 	if c.version || c.path {
-		t.Errorf("parseArgs(unknown): version=%v path=%v; want both false (tolerated)", c.version, c.path)
+		t.Errorf("parseArgs(unknown): version=%v path=%v; want both false", c.version, c.path)
+	}
+	// Non-dashed positionals are captured as tags; the dashed --frobnicate is excluded.
+	if len(c.tags) != 2 || c.tags[0] != "sometag" || c.tags[1] != "check" {
+		t.Errorf("parseArgs tags=%v; want [sometag check] (positionals captured)", c.tags)
 	}
 }
 
@@ -365,5 +372,205 @@ func TestRunListColorWhenTTY(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "\x1b[1m") || !strings.Contains(got, "\x1b[36m") || !strings.Contains(got, "\x1b[0m") {
 		t.Errorf("TTY output should contain ANSI bold/cyan/reset:\n%s", got)
+	}
+}
+
+// --- parseArgs: positional <tag> capture (P1.M3.T8.S1) ---
+
+// Positional <tag> args (non-dashed tokens) are captured in INPUT order (PRD §6.1).
+func TestParseArgsCapturesTagsInOrder(t *testing.T) {
+	c := parseArgs([]string{"foo", "writing/reddit"})
+	if len(c.tags) != 2 || c.tags[0] != "foo" || c.tags[1] != "writing/reddit" {
+		t.Errorf("tags=%v; want [foo writing/reddit] in input order", c.tags)
+	}
+}
+
+// Dashed unknowns are NOT tags (they are tolerated flags); only the positional is captured.
+func TestParseArgsDashedUnknownNotATag(t *testing.T) {
+	c := parseArgs([]string{"--frobnicate", "real-tag", "-x"})
+	if len(c.tags) != 1 || c.tags[0] != "real-tag" {
+		t.Errorf("tags=%v; want [real-tag] (dashed tokens excluded)", c.tags)
+	}
+}
+
+// Tags and recognized flags may interleave (PRD §6: flags appear in any order).
+func TestParseArgsTagsAndFlagsInterleave(t *testing.T) {
+	c := parseArgs([]string{"--no-color", "a", "-l", "b"})
+	if !c.list || !c.noColor || len(c.tags) != 2 || c.tags[0] != "a" || c.tags[1] != "b" {
+		t.Errorf("config=%+v; want list+noColor true and tags=[a b]", c)
+	}
+}
+
+// --- run: <tag> resolution (P1.M3.T8.S1) ---
+
+// sampleStore builds a store with a top-level `example` and a nested
+// `writing/reddit` skill, returning the skills dir (set via SKPP_SKILLS_DIR rule 1).
+func sampleStore(t *testing.T) string {
+	t.Helper()
+	return writeSkillTree(t, map[string]string{
+		"example":        "---\nname: example\ndescription: A demo skill.\n---\n# body\n",
+		"writing/reddit": "---\nname: reddit-poster\ndescription: Posts to reddit.\n---\n# body\n",
+	})
+}
+
+// Single tag resolves to its absolute skill DIRECTORY path on stdout, exit 0, no
+// stderr. The default output is the dir, not SKILL.md (--file is P1.M3.T8.S2).
+func TestRunTagSingleResolvesToDir(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"example"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(example): code=%d; want 0", code)
+	}
+	want := filepath.Join(dir, "example") + "\n"
+	if got := out.String(); got != want {
+		t.Errorf("run(example) stdout=%q; want %q (absolute dir + newline)", got, want)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("run(example) stderr=%q; want empty", errOut.String())
+	}
+}
+
+// Multiple tags -> one path per line, in INPUT order (not sorted), exit 0. `reddit`
+// resolves by basename to writing/reddit; `example` by canonical tag.
+func TestRunTagMultipleInInputOrder(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"reddit", "example"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(reddit example): code=%d; want 0", code)
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 paths; got %d: %q", len(lines), out.String())
+	}
+	if lines[0] != filepath.Join(dir, "writing", "reddit") {
+		t.Errorf("lines[0]=%q; want the reddit dir (input order preserved)", lines[0])
+	}
+	if lines[1] != filepath.Join(dir, "example") {
+		t.Errorf("lines[1]=%q; want the example dir (input order preserved)", lines[1])
+	}
+}
+
+// ATOMICITY (§6.4): one unknown tag among resolvable ones -> NOTHING on stdout, one
+// stderr line per problem tag, exit 1. The resolvable tag must NOT leak to stdout.
+func TestRunTagAtomicityUnknownPrintsNothing(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"example", "nope"}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(example nope): code=%d; want 1 (atomic failure)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY (§6.4: nothing printed on failure)", out.String())
+	}
+	if !strings.Contains(errOut.String(), "nope") {
+		t.Errorf("stderr=%q; want an error line naming 'nope'", errOut.String())
+	}
+}
+
+// All tags fail -> one stderr line per problem tag, nothing on stdout, exit 1.
+func TestRunTagAllFailMultipleErrorLines(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"nope1", "nope2"}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(nope1 nope2): code=%d; want 1", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY", out.String())
+	}
+	errLines := strings.Split(strings.TrimRight(errOut.String(), "\n"), "\n")
+	if len(errLines) != 2 {
+		t.Fatalf("want 2 stderr lines (one per problem tag); got %d: %q", len(errLines), errOut.String())
+	}
+}
+
+// A tag repeated in argv resolves each time; output repeats. Not an error.
+func TestRunTagDuplicateArgResolvesTwice(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"example", "example"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(example example): code=%d; want 0", code)
+	}
+	want := strings.Repeat(filepath.Join(dir, "example")+"\n", 2)
+	if got := out.String(); got != want {
+		t.Errorf("stdout=%q; want two identical path lines:\n%s", got, want)
+	}
+}
+
+// Ambiguous tag (basename collision) -> stderr lists the candidate full tags,
+// NOTHING on stdout, exit 1 (PRD §6.4).
+func TestRunTagAmbiguousListsCandidates(t *testing.T) {
+	dir := writeSkillTree(t, map[string]string{
+		"writing/reddit": "---\nname: a\ndescription: d\n---\nx\n",
+		"coding/reddit":  "---\nname: b\ndescription: d\n---\nx\n",
+	})
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"reddit"}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(reddit) ambiguous: code=%d; want 1", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY (ambiguous => nothing on stdout)", out.String())
+	}
+	msg := errOut.String()
+	for _, want := range []string{"reddit", "coding/reddit", "writing/reddit"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("stderr=%q; missing candidate %q", msg, want)
+		}
+	}
+}
+
+// Skills dir unresolvable + tags -> exit 1, nothing on stdout, the one-line fix on
+// stderr (same contract as --path/--list).
+func TestRunTagSkillsDirUnresolvable(t *testing.T) {
+	unsetSkillsEnv(t)
+	t.Chdir(t.TempDir()) // all three §8 rules miss
+	var out, errOut bytes.Buffer
+	code := run([]string{"example"}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(example) unresolvable: code=%d; want 1", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY", out.String())
+	}
+	if !strings.Contains(errOut.String(), "SKPP_SKILLS_DIR") {
+		t.Errorf("stderr=%q; want the one-line fix", errOut.String())
+	}
+}
+
+// The resolved path is ABSOLUTE (PRD §6.1 default; --relative is P1.M3.T8.S2).
+func TestRunTagPathIsAbsolute(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"example"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(example): code=%d; want 0", code)
+	}
+	if p := strings.TrimRight(out.String(), "\n"); !filepath.IsAbs(p) {
+		t.Errorf("resolved path %q is not absolute (discover.Skill.Dir should be absolute)", p)
+	}
+}
+
+// --version precedes tag-resolution mode even when a tag is present (PRD §6.3).
+func TestRunVersionPrecedenceOverTag(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"example", "--version"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(example --version): code=%d; want 0 (version precedence)", code)
+	}
+	if got := out.String(); got != "skpp "+version+"\n" {
+		t.Errorf("stdout=%q; want the version line (precedence over tag mode)", got)
 	}
 }
