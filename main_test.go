@@ -1532,3 +1532,218 @@ func TestRunExclusivityCheckAndList(t *testing.T) {
 		t.Errorf("stdout=%q; want empty", out.String())
 	}
 }
+
+// --- parseArgs: combined short flags + --flag=value (P1.M4.T1.S1, Issue 5) ---
+
+// Combined short BOOL bundles expand into their individual flags.
+func TestParseArgsShortBundles(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		chk  func(*testing.T, config)
+	}{
+		{"-vh", []string{"-vh"}, func(t *testing.T, c config) {
+			if !c.version || !c.help {
+				t.Errorf("-vh: version=%v help=%v; want true,true", c.version, c.help)
+			}
+		}},
+		{"-af", []string{"-af"}, func(t *testing.T, c config) {
+			if !c.all || !c.file {
+				t.Errorf("-af: all=%v file=%v; want true,true", c.all, c.file)
+			}
+		}},
+		{"-pl", []string{"-pl"}, func(t *testing.T, c config) {
+			if !c.path || !c.list {
+				t.Errorf("-pl: path=%v list=%v; want true,true", c.path, c.list)
+			}
+		}},
+		{"-fl", []string{"-fl"}, func(t *testing.T, c config) {
+			if !c.file || !c.list {
+				t.Errorf("-fl: file=%v list=%v; want true,true", c.file, c.list)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := parseArgs(tc.args)
+			tc.chk(t, c)
+			// A pure-bool bundle must NOT trip unknownFlag or capture a tag.
+			if c.unknownFlag != "" {
+				t.Errorf("%s: unknownFlag=%q; want empty", tc.name, c.unknownFlag)
+			}
+		})
+	}
+}
+
+// Long --flag=value: bool flags IGNORE the value (PRD §6 / decisions.md §D5).
+func TestParseArgsLongEqualsBoolFlags(t *testing.T) {
+	cases := []struct {
+		arg string
+		chk func(*testing.T, config)
+	}{
+		{"--version=9.9", func(t *testing.T, c config) {
+			if !c.version {
+				t.Errorf("--version=9.9: version=false; want true (value ignored)")
+			}
+		}},
+		{"--path=/x", func(t *testing.T, c config) {
+			if !c.path {
+				t.Errorf("--path=/x: path=false; want true (value ignored)")
+			}
+		}},
+		{"--no-color=1", func(t *testing.T, c config) {
+			if !c.noColor {
+				t.Errorf("--no-color=1: noColor=false; want true (value ignored)")
+			}
+		}},
+		{"--relative=yes", func(t *testing.T, c config) {
+			if !c.relative {
+				t.Errorf("--relative=yes: relative=false; want true (value ignored)")
+			}
+		}},
+		{"--help=anything", func(t *testing.T, c config) {
+			if !c.help {
+				t.Errorf("--help=anything: help=false; want true (value ignored)")
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.arg, func(t *testing.T) {
+			c := parseArgs([]string{tc.arg})
+			tc.chk(t, c)
+			if c.unknownFlag != "" {
+				t.Errorf("%s: unknownFlag=%q; want empty", tc.arg, c.unknownFlag)
+			}
+		})
+	}
+}
+
+// --search=foo sets searchMode + captures the value (which is NOT a tag).
+func TestParseArgsLongEqualsSearch(t *testing.T) {
+	c := parseArgs([]string{"--search=foo"})
+	if !c.searchMode || c.searchQ != "foo" {
+		t.Errorf("--search=foo: mode=%v q=%q; want true,foo", c.searchMode, c.searchQ)
+	}
+	if len(c.tags) != 0 {
+		t.Errorf("--search value leaked into tags: %v", c.tags)
+	}
+}
+
+// --search= (empty value) is valid -> searchMode=true, searchQ="".
+func TestParseArgsLongEqualsSearchEmpty(t *testing.T) {
+	c := parseArgs([]string{"--search="})
+	if !c.searchMode || c.searchQ != "" {
+		t.Errorf("--search=: mode=%v q=%q; want true,\"\"", c.searchMode, c.searchQ)
+	}
+}
+
+// --bogus=x (unknown long with '=') -> unknownFlag set (the whole token).
+func TestParseArgsLongEqualsUnknown(t *testing.T) {
+	c := parseArgs([]string{"--bogus=x"})
+	if c.unknownFlag == "" {
+		t.Errorf("--bogus=x: unknownFlag empty; want set (whole token reported)")
+	}
+}
+
+// -sfoo (attached short value) -> searchMode=true, searchQ="foo".
+func TestParseArgsShortAttachedSearch(t *testing.T) {
+	c := parseArgs([]string{"-sfoo"})
+	if !c.searchMode || c.searchQ != "foo" {
+		t.Errorf("-sfoo: mode=%v q=%q; want true,foo", c.searchMode, c.searchQ)
+	}
+}
+
+// -ls foo (bundle ending in -s, value from the NEXT arg) -> list + search "foo".
+func TestParseArgsShortBundleSearchNextArg(t *testing.T) {
+	c := parseArgs([]string{"-ls", "foo"})
+	if !c.list {
+		t.Errorf("-ls foo: list=false; want true")
+	}
+	if !c.searchMode || c.searchQ != "foo" {
+		t.Errorf("-ls foo: mode=%v q=%q; want true,foo", c.searchMode, c.searchQ)
+	}
+	if len(c.tags) != 0 {
+		t.Errorf("-ls foo: 'foo' leaked into tags: %v", c.tags)
+	}
+}
+
+// -lsfoo (bundle with attached -s value) -> list + search "foo".
+func TestParseArgsShortBundleSearchAttached(t *testing.T) {
+	c := parseArgs([]string{"-lsfoo"})
+	if !c.list || !c.searchMode || c.searchQ != "foo" {
+		t.Errorf("-lsfoo: list=%v mode=%v q=%q; want true,true,foo", c.list, c.searchMode, c.searchQ)
+	}
+}
+
+// -vz (unknown char in a bundle): the WHOLE bundle is rejected — unknownFlag is
+// set AND version/help are NOT leaked. (Two-phase commit; run() precedence would
+// otherwise mask the error. See verified_facts §4.)
+func TestParseArgsShortBundleUnknownCharRejectsWhole(t *testing.T) {
+	c := parseArgs([]string{"-vz"})
+	if c.unknownFlag == "" {
+		t.Errorf("-vz: unknownFlag empty; want set (whole bundle rejected)")
+	}
+	if c.version {
+		t.Errorf("-vz: version=true; want false (wholesale reject — no partial commit)")
+	}
+	if c.help {
+		t.Errorf("-vz: help=true; want false (wholesale reject)")
+	}
+}
+
+// -vs as the LAST token (s present, no value anywhere): the bool before s is set,
+// searchMode stays false (mirrors the bare -s-no-value rule).
+func TestParseArgsShortBundleSearchNoValue(t *testing.T) {
+	c := parseArgs([]string{"-vs"})
+	if !c.version {
+		t.Errorf("-vs: version=false; want true (bool before s is committed)")
+	}
+	if c.searchMode {
+		t.Errorf("-vs: searchMode=true; want false (s had no value -> stays inactive)")
+	}
+}
+
+// -sv: once s is seen, the rest of the body is the query — so 'v' is the QUERY,
+// not a flag (version stays false).
+func TestParseArgsShortBundleSConsumesRestAsQuery(t *testing.T) {
+	c := parseArgs([]string{"-sv"})
+	if !c.searchMode || c.searchQ != "v" {
+		t.Errorf("-sv: mode=%v q=%q; want true,\"v\" (rest after s is the query)", c.searchMode, c.searchQ)
+	}
+	if c.version {
+		t.Errorf("-sv: version=true; want false (v after s is query, not a flag)")
+	}
+}
+
+// --- run: combined shorts + --flag=value smoke (P1.M4.T1.S1) ---
+
+// --version=1.2.3 end-to-end: prints the version line, exit 0.
+func TestRunLongEqualsVersion(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--version=1.2.3"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--version=1.2.3): code=%d; want 0", code)
+	}
+	if got := out.String(); got != "skpp "+version+"\n" {
+		t.Errorf("stdout=%q; want 'skpp <version>\\n' (value ignored)", got)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr=%q; want empty", errOut.String())
+	}
+}
+
+// -vz end-to-end: exit 2 (proves the wholesale reject — version does NOT mask the
+// unknown char, because version was never committed).
+func TestRunShortBundleUnknownExit2(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"-vz"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(-vz): code=%d; want 2 (unknown char, wholesale reject)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY (§6.4: nothing on stdout on exit-2)", out.String())
+	}
+	if !strings.Contains(errOut.String(), "unknown flag") {
+		t.Errorf("stderr=%q; want an 'unknown flag' message", errOut.String())
+	}
+}

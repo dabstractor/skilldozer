@@ -149,6 +149,56 @@ func parseArgs(args []string) config {
 	// PRD §6.1/§6.2: --search/-s take exactly one value; every other flag is a bool.
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+
+		// Issue 5 (decisions.md §D5): normalize combined / '='-bearing tokens
+		// BEFORE the exact-match switch so POSIX forms work. Each branch ends in
+		// `continue`; the switch below still handles the original exact-token forms
+		// (--version, -v, --search <q>, check, bare tags, and unknowns like -x).
+
+		// (a) Long flag with '=': --flag=value. Split on the FIRST '='; bool flags
+		// ignore the value (--version=x == --version), --search takes it as the
+		// query, an unknown name is an unknown flag (the whole token is reported).
+		if strings.HasPrefix(a, "--") && strings.Contains(a, "=") {
+			eq := strings.IndexByte(a, '=')
+			name, val := a[:eq], a[eq+1:]
+			switch name {
+			case "--version":
+				c.version = true
+			case "--help":
+				c.help = true
+			case "--path":
+				c.path = true
+			case "--list":
+				c.list = true
+			case "--all":
+				c.all = true
+			case "--file":
+				c.file = true
+			case "--relative":
+				c.relative = true
+			case "--no-color":
+				c.noColor = true
+			case "--search":
+				c.searchMode = true
+				c.searchQ = val
+			default:
+				if c.unknownFlag == "" {
+					c.unknownFlag = a
+				}
+			}
+			continue
+		}
+
+		// (b) Short bundle: -xyz (single '-', not "--", len > 2). Expand into the
+		// individual short flags; -s (value-taking) may consume the next token.
+		// len-2 shorts ("-v", "-s", ...) and "--..." longs fall through to the switch.
+		if len(a) > 2 && a[0] == '-' && a[1] != '-' {
+			if consumeNext, _ := expandShortBundle(&c, a, args, i); consumeNext {
+				i++ // -s took its value from the next argv token
+			}
+			continue
+		}
+
 		switch a {
 		case "--version", "-v":
 			c.version = true
@@ -207,6 +257,95 @@ func parseArgs(args []string) config {
 		}
 	}
 	return c
+}
+
+// expandShortBundle parses a combined short-flag token `a` (e.g. "-vh", "-pl",
+// "-sfoo", "-ls") and applies the resulting flags to *c. It implements Issue 5's
+// short-bundle normalization (decisions.md §D5). The caller has already guaranteed
+// `a` is bundle-shaped: a single leading '-', not "--", and len(a) > 2.
+//
+// Semantics (PRD §6 short forms; the short set is exactly v h p l a f s):
+//   - v/h/p/l/a/f are BOOL flags; each sets its config field.
+//   - s is the VALUE-TAKING flag (--search): once seen, the rest of the body is
+//     the query (e.g. "-sfoo" -> "foo"); if the rest is empty, the NEXT argv
+//     token is consumed as the query (e.g. "-ls foo" -> list + query "foo"), and
+//     the caller advances i (returns consumeNext=true). If no value is available
+//     at all (empty rest AND no next arg), searchMode stays false — mirroring the
+//     bare "-s"-with-no-value rule in the main switch.
+//   - any char that is NEITHER a bool flag NOR the leading 's' is UNKNOWN: the
+//     WHOLE bundle is rejected — c.unknownFlag is set to `a` and NOTHING is
+//     applied. This two-phase (validate-then-commit) design is REQUIRED because
+//     run() checks unknownFlag AFTER version/help: a leaked `version=true` from a
+//     partial "-vz" would make run() print the version (exit 0) and mask the
+//     unknown-char error.
+//
+// Returns (consumeNext, ok). ok is always true for a bundle-shaped token (it was
+// handled, validly or as-unknown). consumeNext=true tells the caller to i++ (the
+// -s value came from the next argv token).
+func expandShortBundle(c *config, a string, args []string, i int) (consumeNext, ok bool) {
+	body := a[1:] // strip the single leading '-'
+
+	// Phase 1 — validate. Walk bool flags left-to-right; the FIRST non-bool char
+	// must be 's' (then the rest is the query) or it is unknown. Record where 's'
+	// sits (sIdx) so Phase 2 knows where flags end and the query begins.
+	sIdx := -1
+	for j := 0; j < len(body); j++ {
+		ch := body[j]
+		if ch == 's' {
+			sIdx = j
+			break // 's' ends flag parsing; body[j+1:] is the query
+		}
+		switch ch {
+		case 'v', 'h', 'p', 'l', 'a', 'f':
+			// valid bool short flag (validated here; applied in Phase 2)
+		default:
+			// Unknown char: reject the WHOLE bundle. Commit nothing (two-phase).
+			if c.unknownFlag == "" {
+				c.unknownFlag = a
+			}
+			return false, true
+		}
+	}
+
+	// Phase 2 — commit the bool flags in [0, sIdx) (or the whole body if no 's').
+	end := len(body)
+	if sIdx >= 0 {
+		end = sIdx
+	}
+	for j := 0; j < end; j++ {
+		switch body[j] {
+		case 'v':
+			c.version = true
+		case 'h':
+			c.help = true
+		case 'p':
+			c.path = true
+		case 'l':
+			c.list = true
+		case 'a':
+			c.all = true
+		case 'f':
+			c.file = true
+		}
+	}
+
+	// Handle the value-taking 's' if it was present.
+	if sIdx >= 0 {
+		remainder := body[sIdx+1:]
+		switch {
+		case remainder != "":
+			c.searchMode = true
+			c.searchQ = remainder // value embedded in the bundle ("-sfoo")
+		case i+1 < len(args):
+			c.searchMode = true
+			c.searchQ = args[i+1] // value is the next argv token ("-ls foo")
+			return true, true     // caller advances i
+		default:
+			// 's' seen but no value anywhere: mirror the bare "-s"-no-value rule
+			// (searchMode stays false). The bool flags before it remain set.
+		}
+	}
+	return false, true
 }
 
 // run is the testable dispatcher. It returns the process exit code so main() can

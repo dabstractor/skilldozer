@@ -107,21 +107,21 @@
           "type": "Milestone",
           "id": "P1.M4",
           "title": "CLI Ergonomics Polish",
-          "status": "Planned",
+          "status": "Ready",
           "description": "Resolve Issues 5 and 6 (both Minor UX): combined short flags and --flag=value syntax are rejected as unknown flags, and combining two listing modes silently picks one by dispatch order. Both touch main.go but different functions (parseArgs vs exclusivityError/run dispatch).",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M4.T1",
               "title": "Support combined short flags and --flag=value syntax",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Normalize argv tokens in parseArgs before the exact-match switch so that --flag=value and -abc (combined short bool flags) are accepted. The short flag set is v h p l a f s; only -s/--search takes a value.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T1.S1",
                   "title": "Normalize tokens in parseArgs before the switch",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/issue_analysis.md §Issue 5 and decisions.md §D5. main.go:145 parseArgs uses `switch a` (main.go:152) that matches exact whole tokens only. `-vh` does not match `case \"-v\"`; `--version=x` does not match `case \"--version\"` → both fall to the default branch → captured as unknownFlag → exit 2 (main.go:194-198). The short flag set with single-dash forms is: v (--version), h (--help), p (--path), l (--list), a (--all), f (--file), s (--search). --relative and --no-color are LONG-ONLY (no short alias, cannot appear in a bundle). Only --search/-s is value-taking.\n2. INPUT: The existing parseArgs function and config struct. No new fields.\n3. LOGIC: At the TOP of the parseArgs for-loop body (before `switch a`), normalize the token `a` into a canonical form: (a) LONG FLAGS with `=`: if `a` starts with `--` and contains `=`, split into flag and value parts. Map the flag part to its case (e.g. `--search` → set searchMode=true and searchQ=value; `--version` → set version=true, ignore the value for bool flags). (b) SHORT BUNDLES: if `a` starts with single `-` (not `--`), has length > 2, and every char is a known short bool flag (v/h/p/l/a/f), expand: set each corresponding config field to true. If the bundle contains `s` (the value-taking short flag), `s` must be LAST in the bundle and the remainder after `s` (or the next arg) is the search query (e.g. `-sfoo` → search \"foo\", `-ls foo` → list=true AND search \"foo\"). An unknown char in a bundle → unknownFlag. (c) The `check` positional token and bare tags (no leading `-`) pass through unchanged to the existing default branch.\n4. OUTPUT: `-vh`, `-pl`, `--version=x`, `--search=foo`, `-sfoo` all work. Existing exact-token forms (`--version`, `-v`, `--search foo`) still work unchanged. Unknown flags still exit 2.\n5. TESTS (implied TDD): ADD main_test.go tests: parseArgs([\"-vh\"]) → version=true, help=true; parseArgs([\"--path=/x\"]) → path=true (value ignored for bool); parseArgs([\"--search=foo\"]) → searchMode=true, searchQ=\"foo\"; parseArgs([\"-sfoo\"]) → searchMode=true, searchQ=\"foo\"; parseArgs([\"-af\"]) → all=true, file=true. Verify unknown char in bundle (e.g. `-vz`) sets unknownFlag. Existing parseArgs tests (TestParseArgs*) must still pass.\n6. DOCS: [Mode A] none — the flags themselves do not change (no new flag surface); only how they are parsed. The usageText already lists the short forms.",
@@ -137,14 +137,14 @@
               "type": "Task",
               "id": "P1.M4.T2",
               "title": "Reject conflicting listing modes",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Extend exclusivityError to reject any combination of two or more listing modes (--path, --list, --search, --all), and fix the stale dispatch-order comment in main.go run().",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T2.S1",
                   "title": "Extend exclusivityError for mode+mode combos and fix stale dispatch comment",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/issue_analysis.md §Issue 6 and decisions.md §D6. exclusivityError (main.go:484-497) currently checks three families: tags+(list/search/all), check+tags, check+(list/search/all). It does NOT reject mode+mode combos like --list --search. The dispatch order in run() is path > list > search > check > all > tags (confirmed by the top-level if-chain: path=main.go:268, list=283, search=321, check=361, all=402, tags=433). The stale comment at main.go:266-267 (\"// 5) Normal mode dispatch (order unchanged): check → path → list → search → all → tags\") is WRONG — check is step 8 (after path/list/search), not first.\n2. INPUT: The existing exclusivityError function and config struct.\n3. LOGIC: In exclusivityError (main.go:484), add a 4th family BEFORE the existing checks: count how many of {c.path, c.list, c.searchMode, c.all} are true; if >= 2, return (true, \"skpp: listing modes --path/--list/--search/--all are mutually exclusive\"). Also fix the stale comment at main.go:266-267 to reflect the ACTUAL dispatch order: path → list → search → check → all → tags. Note: check is standalone-safe because exclusivityError already rejects check+mode and check+tags, so check's late position in dispatch is harmless.\n4. OUTPUT: `--list --search foo`, `--all --list`, `--path --list` now exit 2 with a clear message. Existing tags+mode, check+tags, check+mode exclusivity unchanged.\n5. TESTS (implied TDD): ADD main_test.go tests: run([\"--list\", \"--search\", \"foo\"]) → exit 2, stderr contains \"mutually exclusive\"; run([\"--all\", \"--list\"]) → exit 2; run([\"--path\", \"--list\"]) → exit 2. Existing exclusivity tests (TestRunExclusivity* or similar) must still pass. NOTE: this subtask and P1.M4.T1.S1 both modify main.go but touch different functions (exclusivityError/run vs parseArgs); if P1.M4.T1.S1 has already landed, line numbers may have shifted but the functions are non-overlapping.\n6. DOCS: [Mode A] none — no new flag surface; the exclusivity error message is runtime output, not documented config.",
