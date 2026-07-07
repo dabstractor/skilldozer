@@ -126,7 +126,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Discovery & frontmatter parsing (PRD §7, build order step 2)",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Implement the disk-discovery layer: parse SKILL.md YAML frontmatter (lenient, yaml.v3), extract skpp metadata conventions from the metadata map, walk the skills dir to build a sorted index of skills, and surface it via the `--list` human-readable catalog. This delivers the `skpp --list` command and the []Skill index that resolution (M3) and search/check (M4) consume.",
           "tasks": [
             {
@@ -200,14 +200,14 @@
               "type": "Task",
               "id": "P1.M2.T6",
               "title": "--list catalog output (internal/ui package, §6.1)",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Implement the human-readable catalog table for `skpp --list`: columns TAG, NAME, DESCRIPTION (wrapped). Adds the internal/ui package with ANSI color support gated on TTY + --no-color. Wires --list into main.go.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T6.S1",
                   "title": "ui.PrintList table + ANSI/--no-color + --list wiring",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T3.S1",

@@ -2,13 +2,13 @@
 //
 // main.go is the entrypoint: it parses argv, applies PRD §6 precedence
 // (--version/--help win over everything), and dispatches to the matching mode.
-// For this subtask (P1.M1.T3.S1) only --version/--path are wired; every other
-// §6 flag is added by later milestones (M2 --list, M3 <tag>/--all, M4
-// --search/check, M5 --help + exit codes). The arg parser is intentionally a
-// small hand-rolled switch (not Go's `flag` package) so the full §6 matrix —
-// subcommands like `check`, positional <tag> args, long+short aliases, and §6.3
-// mutual exclusivity — can be expressed cleanly. See
-// plan/001_fcde63e5bb60/P1M1T3S1/research/verified_facts.md §5.
+// Wired so far (grown milestone by milestone): --version/--path (M1.T3) and
+// --list (M2.T6). Every other §6 flag is added by later milestones (M3
+// <tag>/--all, M4 --search/check, M5 --help + exit codes). The arg parser is
+// intentionally a small hand-rolled switch (not Go's `flag` package) so the full
+// §6 matrix — subcommands like `check`, positional <tag> args, long+short
+// aliases, and §6.3 mutual exclusivity — can be expressed cleanly. See
+// plan/001_fcde63e5bb60/P1M1.T3.S1/research/verified_facts.md §5.
 package main
 
 import (
@@ -16,7 +16,9 @@ import (
 	"io"
 	"os"
 
+	"github.com/dabstractor/skpp/internal/discover"
 	"github.com/dabstractor/skpp/internal/skillsdir"
+	"github.com/dabstractor/skpp/internal/ui"
 )
 
 // version is the skpp version string, printed by `skpp --version`. It is
@@ -32,19 +34,42 @@ import (
 // linker symbol path is `main.version` (NOT the module import path).
 var version = "dev"
 
+// isTerminal reports whether w is an interactive terminal (a character device).
+// It decides whether --list/--search emit ANSI color by default (PRD §6.2: color
+// is on for a TTY unless --no-color is set). It type-asserts w to *os.File and
+// checks the ModeCharDevice bit, so a *bytes.Buffer (tests) or a pipe/redirect
+// correctly yields false -> no color, keeping output deterministic and pipe-safe.
+//
+// It is a package var so tests can override it to exercise the color-enabled path
+// through run() without a real terminal. NOT safe for t.Parallel (mutates package
+// state); the repo convention is no t.Parallel() on such tests anyway.
+var isTerminal = func(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
 // config holds the parsed CLI flags. Grown by later milestones as more of the
-// PRD §6.1/§6.2 matrix lands. For this subtask only version and path are set;
-// every other token is a tolerated no-op (P1.M5.T11 turns unknown flags into
-// exit 2 and adds subcommand/positional handling).
+// PRD §6.1/§6.2 matrix lands. For this subtask version, path, list, and noColor
+// are set; every other token is a tolerated no-op (P1.M5.T11 turns unknown flags
+// into exit 2 and adds subcommand/positional handling).
 type config struct {
 	version bool // --version / -v : print "skpp <version>" and exit 0
 	path    bool // --path / -p    : print resolved skills dir and exit 0/1
-	// Future (M2-M5), do NOT add yet:
-	//   list, all bool; search string; check bool; file, noColor, relative, help bool; tags []string
+	list    bool // --list / -l    : print the human-readable catalog table (§6.1)
+	noColor bool // --no-color     : disable ANSI color even on a TTY (§6.2)
+	// Future (M3-M5), do NOT add yet:
+	//   all bool; search string; check bool; file, relative, help bool; tags []string
 }
 
 // parseArgs scans argv tokens and fills a config. Flags may appear in any order
@@ -62,6 +87,10 @@ func parseArgs(args []string) config {
 			c.version = true
 		case "--path", "-p":
 			c.path = true
+		case "--list", "-l":
+			c.list = true
+		case "--no-color":
+			c.noColor = true
 		default:
 			// Unknown flag / subcommand / positional: tolerated for now.
 			// P1.M5.T11 implements: unknown flag -> exit 2 (§6.2),
@@ -76,8 +105,9 @@ func parseArgs(args []string) config {
 // injected so tests capture output via *bytes.Buffer instead of the real streams.
 //
 // Exit codes (PRD §6; this subtask's slice):
-//   - 0: --version printed; --path succeeded
-//   - 1: --path failed (skills dir unresolvable); default (no recognized flag)
+//   - 0: --version printed; --path succeeded; --list printed the catalog
+//   - 1: --path/--list failed (skills dir unresolvable, or no skills for --list);
+//     default (no recognized flag)
 //   - 2: (DEFERRED to P1.M5.T11) unknown flag / mutually-exclusive modes mixed
 //
 // Precedence (PRD §6.3): --version (and, in M5, --help) win over everything.
@@ -103,6 +133,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// Byte-exact: ONLY the dir + newline. The §13 acceptance gate
 		// `test "$(./skpp --path)" = "$PWD/skills"` depends on this.
 		fmt.Fprintln(stdout, dir)
+		return 0
+	}
+
+	if c.list {
+		// PRD §6.1 `skpp --list`: resolve the store, build the index, render the
+		// table. This is the FIRST place the Find() -> discover.Index() data flow
+		// is wired end-to-end (M2.T6). Exit 1 on any failure path.
+		dir, _, err := skillsdir.Find()
+		if err != nil {
+			fmt.Fprintln(stderr, err) // verbatim one-line fix (PRD §6.4/§8.4)
+			return 1
+		}
+		skills, err := discover.Index(dir)
+		if err != nil {
+			fmt.Fprintln(stderr, err) // e.g. skills dir vanished between Find and Index
+			return 1
+		}
+		if len(skills) == 0 {
+			// PRD §6.1: --list exits 1 "if no skills found". Message to stderr so
+			// stdout stays clean for any consumer.
+			fmt.Fprintln(stderr, "no skills found in "+dir)
+			return 1
+		}
+		// Color only when stdout is a TTY AND --no-color was not given (PRD §6.2).
+		// A *bytes.Buffer (tests) / pipe / file is not a TTY -> plain output.
+		ui.PrintList(stdout, skills, isTerminal(stdout) && !c.noColor)
 		return 0
 	}
 
