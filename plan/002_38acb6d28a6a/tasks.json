@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Skills-dir config discovery — §8.1 config-file mechanism + §8.3 5-rule priority",
-          "status": "Planned",
+          "status": "Researching",
           "description": "The foundation. Today internal/skillsdir/skillsdir.go implements only 3 discovery rules (env -> sibling -> walk-up) and an old ErrNotFound message. PRD §8.3 now requires 5 rules with a new config-file rule at priority #2. This milestone adds the internal/config package (read/write/path/default-store) as the dependency root, adds the SourceConfig enum + label, exports HasSkillMD for reuse by init, and wires findConfig into Find() at priority #2 with the exact PRD unconfigured message. No main.go / UX changes here (those land in M2).",
           "tasks": [
             {
@@ -60,14 +60,14 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Wire the config-file rule into skillsdir.Find() and adopt the 5-rule priority + new unconfigured message",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Extend internal/skillsdir/skillsdir.go from 3 rules to the PRD §8.3 5-rule ladder: env -> config file -> sibling -> walk-up -> ErrNotFound. Add the SourceConfig enum value and its 'config file' --path label, refresh the stale package/Find() doc comments, export HasSkillMD for reuse by init, implement findConfig() consuming the new config package, and replace the old ErrNotFound hint with the exact PRD string. The behavior of the existing 3 rules is unchanged (only their priority position shifts down by one).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Add SourceConfig enum value + 'config file' label + refresh doc comments + export HasSkillMD",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/code_prd_delta.md G2/G3/G12/G14 and the current Source enum at internal/skillsdir/skillsdir.go:25-52 (SourceEnv=0, SourceSibling, SourceWalkUp). hasSkillMD is at skillsdir.go:139-166, currently unexported. Insert SourceConfig between SourceEnv and SourceSibling so iota order tracks priority order.\n2. INPUT: None (type/enum/doc changes only).\n3. LOGIC: (a) Add `SourceConfig` to the const block immediately after SourceEnv (so the values are Env=0, Config=1, Sibling=2, WalkUp=3). (b) Add `case SourceConfig: return \"config file\"` to Source.String() (PRD §8.3 enumerates exactly four labels: SKILLDOZER_SKILLS_DIR, config file, sibling of binary, ancestor of cwd). (c) Update the package doc comment (skillsdir.go:3-7) and the Find() doc comment (skillsdir.go:218-231) from '3 rules' to the 5-rule ladder env -> config -> sibling -> walk-up -> unconfigured-hint. (d) Export the cwd-auto-detect predicate: rename the existing `hasSkillMD` to `HasSkillMD` (exported) and update its single internal caller findWalkUpAncestor — OR add a thin exported `HasSkillMD` that delegates to the existing private fn; either way the public symbol `HasSkillMD(dir string) bool` must exist for P1.M2.T2.S1 (init cwd-detect) to consume.\n4. OUTPUT: Exported `skillsdir.SourceConfig` and `skillsdir.HasSkillMD`; refreshed doc comments; the 'config file' label. Consumed by P1.M1.T2.S2 (Find uses SourceConfig) and P1.M2.T2.S1 (init uses HasSkillMD). Update skillsdir_test.go TestSourceString to assert {SourceConfig, \"config file\"}.\n5. DOCS: none — no user-facing surface (the --path stderr label is surfaced by main.go unchanged once Source.String() returns it; that behavior already exists at main.go:421).",
@@ -81,7 +81,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T2.S2",
                   "title": "Implement findConfig() rule and wire it into Find() at priority #2; set the exact ErrNotFound message",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S1",

@@ -1,16 +1,21 @@
 // Package skillsdir locates the on-disk skills/ directory for skilldozer.
 //
-// It implements the PRD §8 priority order:
+// It implements the PRD §8.3 priority order (first hit wins):
 //
-//  1. SKILLDOZER_SKILLS_DIR env var — if set and an existing dir, use it as-is.
-//  2. Sibling of the running binary (symlink-aware via os.Executable + EvalSymlinks).
-//  3. Walk up from the current working directory.
+//  1. SKILLDOZER_SKILLS_DIR env var — override; if set and an existing dir, use it as-is.
+//  2. Config file `store` (PRD §8.1) — the primary, set by `skilldozer init`.
+//  3. Sibling of the running binary (symlink-aware via os.Executable + EvalSymlinks).
+//  4. Walk up from the current working directory.
+//  5. None ⇒ unconfigured: Find returns ErrNotFound; the caller prints a one-line
+//     fix to stderr and exits 1.
 //
-// The public entry point is Find() (added in P1.M1.T2.S3), which calls the
-// per-rule helpers in order and returns the first hit. Each per-rule helper
-// returns (dir string, src Source, found bool) where found is true only when
-// that rule produced a usable absolute directory; on found==false the src value
-// is meaningless and the caller falls through to the next rule.
+// The public entry point is Find(), which calls the per-rule helpers in order and
+// returns the first hit. Each per-rule helper returns (dir string, src Source,
+// found bool) where found is true only when that rule produced a usable absolute
+// directory; on found==false the src value is meaningless and the caller falls
+// through to the next rule. Source.String() labels each rule for `--path` stderr
+// reporting (PRD §8.3): SKILLDOZER_SKILLS_DIR, config file, sibling of binary,
+// ancestor of cwd.
 package skillsdir
 
 import (
@@ -27,6 +32,8 @@ type Source int
 const (
 	// SourceEnv means SKILLDOZER_SKILLS_DIR was set and pointed at an existing dir.
 	SourceEnv Source = iota
+	// SourceConfig means the skills dir was read from the config file's `store` key (PRD §8.1).
+	SourceConfig
 	// SourceSibling means the skills dir was found next to the running binary.
 	SourceSibling
 	// SourceWalkUp means the skills dir was found by walking up from cwd.
@@ -39,6 +46,8 @@ func (s Source) String() string {
 	switch s {
 	case SourceEnv:
 		return "SKILLDOZER_SKILLS_DIR"
+	case SourceConfig:
+		return "config file"
 	case SourceSibling:
 		return "sibling of binary"
 	case SourceWalkUp:
@@ -137,11 +146,11 @@ func resolveSiblingFromExe(exe string) (dir string, found bool) {
 // ---------------------------------------------------------------------------
 
 // errSkillMDFound is a sentinel error used to short-circuit filepath.WalkDir as
-// soon as the first SKILL.md is found, so hasSkillMD does not walk the entire
+// soon as the first SKILL.md is found, so HasSkillMD does not walk the entire
 // tree. Returning any non-nil error from a WalkDir callback stops the walk.
 var errSkillMDFound = errors.New("SKILL.md found")
 
-// hasSkillMD reports whether dir contains at least one SKILL.md at any depth.
+// HasSkillMD reports whether dir contains at least one SKILL.md at any depth.
 // It walks the tree under dir but returns true as soon as it finds one (early
 // exit via the errSkillMDFound sentinel). PRD §8.3 requires "at least one
 // SKILL.md" — a skills/ dir with none does not count.
@@ -150,7 +159,11 @@ var errSkillMDFound = errors.New("SKILL.md found")
 // path/filepath does not support "**" (it behaves like single-level "*"), so
 // Glob("skills/**/SKILL.md") matches nothing for a nested file. WalkDir is the
 // correct stdlib tool and recurses to arbitrary depth.
-func hasSkillMD(dir string) bool {
+//
+// Exported because it doubles as the §8.2 cwd-auto-detect predicate: `skilldozer
+// init` (P1.M2.T2.S1) uses it to decide whether the current working directory
+// already looks like a store.
+func HasSkillMD(dir string) bool {
 	found := false
 	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -179,7 +192,7 @@ func findWalkUpAncestor(start string) (dir string, found bool) {
 	for {
 		candidate := filepath.Join(cur, "skills")
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			if hasSkillMD(candidate) {
+			if HasSkillMD(candidate) {
 				return candidate, true
 			}
 			// skills/ exists here but has no SKILL.md -> keep ascending.
@@ -215,20 +228,22 @@ func findWalkUp() (dir string, src Source, found bool) {
 // Find — the public entry point (PRD §8 priority order).
 // ---------------------------------------------------------------------------
 
-// ErrNotFound is returned by Find when all three §8 rules miss. Its message is
-// the user-facing one-line fix (PRD §8.4 / §6.4): main prints it to stderr and
-// exits 1. Print it verbatim (err.Error()); do not wrap or prefix it.
+// ErrNotFound is returned by Find when every §8.3 rule misses (unconfigured). Its
+// message is the user-facing one-line fix (PRD §8.4 / §6.4): main prints it to
+// stderr and exits 1. Print it verbatim (err.Error()); do not wrap or prefix it.
 var ErrNotFound = errors.New("could not locate the skills directory: set $SKILLDOZER_SKILLS_DIR, cd into the skilldozer repo, or reinstall skilldozer")
 
-// Find locates the skills directory per PRD §8 priority order:
+// Find locates the skills directory per PRD §8.3 priority order (first hit wins):
 //
-//  1. SKILLDOZER_SKILLS_DIR env var (rule 1, findEnv).
-//  2. Sibling of the running binary, symlink-aware (rule 2, findSibling).
-//  3. Walk up from cwd (rule 3, findWalkUp).
+//  1. SKILLDOZER_SKILLS_DIR env var (SourceEnv).
+//  2. Config file `store` (SourceConfig).
+//  3. Sibling of the running binary, symlink-aware (SourceSibling).
+//  4. Walk up from cwd (SourceWalkUp).
+//  5. None ⇒ unconfigured: returns ErrNotFound.
 //
-// The first rule to hit wins and Find returns (absDir, src, nil). If all three
-// miss it returns ("", 0, ErrNotFound); the caller (main) prints the error to
-// stderr and exits 1.
+// The first rule to hit wins and Find returns (absDir, src, nil). If all miss it
+// returns ("", 0, ErrNotFound); the caller (main) prints the error to stderr and
+// exits 1.
 func Find() (dir string, src Source, err error) {
 	if d, s, ok := findEnv(); ok {
 		return d, s, nil

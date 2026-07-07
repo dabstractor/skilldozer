@@ -32,6 +32,7 @@ func TestSourceString(t *testing.T) {
 		want string
 	}{
 		{SourceEnv, "SKILLDOZER_SKILLS_DIR"},
+		{SourceConfig, "config file"},
 		{SourceSibling, "sibling of binary"},
 		{SourceWalkUp, "ancestor of cwd"},
 		{Source(-1), "unknown"}, // out-of-range -> default
@@ -285,7 +286,7 @@ func makeSkill(t *testing.T, dir, tag string) string {
 	return skills
 }
 
-// --- hasSkillMD ---
+// --- HasSkillMD ---
 
 func TestHasSkillMDFoundNested(t *testing.T) {
 	skills := filepath.Join(t.TempDir(), "skills")
@@ -295,15 +296,15 @@ func TestHasSkillMDFoundNested(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skills, "a", "b", "SKILL.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !hasSkillMD(skills) {
-		t.Errorf("hasSkillMD(nested SKILL.md): got false; want true (WalkDir recurses)")
+	if !HasSkillMD(skills) {
+		t.Errorf("HasSkillMD(nested SKILL.md): got false; want true (WalkDir recurses)")
 	}
 }
 
 func TestHasSkillMDFoundShallow(t *testing.T) {
 	skills := makeSkill(t, t.TempDir(), "foo")
-	if !hasSkillMD(skills) {
-		t.Errorf("hasSkillMD(shallow SKILL.md): got false; want true")
+	if !HasSkillMD(skills) {
+		t.Errorf("HasSkillMD(shallow SKILL.md): got false; want true")
 	}
 }
 
@@ -312,8 +313,8 @@ func TestHasSkillMDEmpty(t *testing.T) {
 	if err := os.MkdirAll(skills, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if hasSkillMD(skills) {
-		t.Errorf("hasSkillMD(empty skills): got true; want false")
+	if HasSkillMD(skills) {
+		t.Errorf("HasSkillMD(empty skills): got true; want false")
 	}
 }
 
@@ -325,8 +326,8 @@ func TestHasSkillMDOnlyNonSkillFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skills, "README.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if hasSkillMD(skills) {
-		t.Errorf("hasSkillMD(only README.md): got true; want false (name must be SKILL.md)")
+	if HasSkillMD(skills) {
+		t.Errorf("HasSkillMD(only README.md): got true; want false (name must be SKILL.md)")
 	}
 }
 
@@ -362,7 +363,7 @@ func TestFindWalkUpAncestorDeep(t *testing.T) {
 	}
 }
 
-// Rule 3: a nested SKILL.md (skills/x/y/SKILL.md) counts (hasSkillMD recurses).
+// Rule 3: a nested SKILL.md (skills/x/y/SKILL.md) counts (HasSkillMD recurses).
 func TestFindWalkUpAncestorNestedSkillMD(t *testing.T) {
 	root := t.TempDir()
 	skills := filepath.Join(root, "skills")
