@@ -574,3 +574,247 @@ func TestRunVersionPrecedenceOverTag(t *testing.T) {
 		t.Errorf("stdout=%q; want the version line (precedence over tag mode)", got)
 	}
 }
+
+// --- parseArgs: modifiers --file/-f, --relative, --all/-a (P1.M3.T8.S2) ---
+
+// --file/-f sets c.file (long and short forms, PRD §6.2).
+func TestParseArgsFileLong(t *testing.T) {
+	c := parseArgs([]string{"--file"})
+	if !c.file {
+		t.Errorf("parseArgs(--file): file=false; want true")
+	}
+}
+
+func TestParseArgsFileShort(t *testing.T) {
+	c := parseArgs([]string{"-f"})
+	if !c.file {
+		t.Errorf("parseArgs(-f): file=false; want true")
+	}
+}
+
+// --relative has NO short form (PRD §6.2 lists only the long form).
+func TestParseArgsRelativeLong(t *testing.T) {
+	c := parseArgs([]string{"--relative"})
+	if !c.relative {
+		t.Errorf("parseArgs(--relative): relative=false; want true")
+	}
+}
+
+// --all/-a sets c.all (long and short forms, PRD §6.1).
+func TestParseArgsAllLong(t *testing.T) {
+	c := parseArgs([]string{"--all"})
+	if !c.all {
+		t.Errorf("parseArgs(--all): all=false; want true")
+	}
+}
+
+func TestParseArgsAllShort(t *testing.T) {
+	c := parseArgs([]string{"-a"})
+	if !c.all {
+		t.Errorf("parseArgs(-a): all=false; want true")
+	}
+}
+
+// Modifiers may interleave with tags and other flags (PRD §6 any order).
+func TestParseArgsModifiersInterleave(t *testing.T) {
+	c := parseArgs([]string{"-f", "example", "--relative"})
+	if !c.file || !c.relative || len(c.tags) != 1 || c.tags[0] != "example" {
+		t.Errorf("config=%+v; want file+relative true and tags=[example]", c)
+	}
+}
+
+// --- run: <tag> + --file/--relative modifiers (P1.M3.T8.S2) ---
+
+// --file prints the ABSOLUTE SKILL.md path instead of the dir (PRD §6.2). The §13
+// gate `test -f "$(./skpp -f example)"` depends on this printing a real file.
+func TestRunTagFilePrintsSourceFile(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"-f", "example"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(-f example): code=%d; want 0", code)
+	}
+	want := filepath.Join(dir, "example", "SKILL.md") + "\n"
+	if got := out.String(); got != want {
+		t.Errorf("run(-f example) stdout=%q; want %q (absolute SKILL.md path)", got, want)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("run(-f example) stderr=%q; want empty", errOut.String())
+	}
+}
+
+// --relative prints the dir path RELATIVE to the skills dir (PRD §6.2). The output
+// uses the OS path separator (filepath.Rel), so compare via FromSlash.
+func TestRunTagRelativePrintsRelativeDir(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--relative", "writing/reddit"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--relative writing/reddit): code=%d; want 0", code)
+	}
+	want := filepath.FromSlash("writing/reddit") + "\n"
+	if got := out.String(); got != want {
+		t.Errorf("run(--relative writing/reddit) stdout=%q; want %q (relative dir)", got, want)
+	}
+}
+
+// --file --relative COMBINE: a SKILL.md path RELATIVE to the skills dir (PRD §6.2).
+func TestRunTagFileRelativeCombine(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"-f", "--relative", "writing/reddit"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(-f --relative writing/reddit): code=%d; want 0", code)
+	}
+	want := filepath.FromSlash("writing/reddit/SKILL.md") + "\n"
+	if got := out.String(); got != want {
+		t.Errorf("run(-f --relative writing/reddit) stdout=%q; want %q (relative SKILL.md)", got, want)
+	}
+}
+
+// Modifiers must NOT break §6.4 atomicity: one bad tag -> NOTHING on stdout, exit 1.
+func TestRunTagFileAtomicity(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"-f", "example", "nope"}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(-f example nope): code=%d; want 1 (atomic failure)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY (modifiers must not break §6.4)", out.String())
+	}
+}
+
+// --- run: --all/-a (P1.M3.T8.S2) ---
+
+// --all prints every skill's absolute DIRECTORY path, one per line, SORTED by
+// canonical tag (discover.Index already sorts []Skill by RelTag). exit 0.
+func TestRunAllPrintsAllDirsSorted(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--all"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--all): code=%d; want 0", code)
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 paths; got %d: %q", len(lines), out.String())
+	}
+	// Sorted by RelTag: "example" < "writing/reddit".
+	if lines[0] != filepath.Join(dir, "example") {
+		t.Errorf("lines[0]=%q; want example dir (sorted)", lines[0])
+	}
+	if lines[1] != filepath.Join(dir, "writing", "reddit") {
+		t.Errorf("lines[1]=%q; want writing/reddit dir (sorted)", lines[1])
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("run(--all) stderr=%q; want empty", errOut.String())
+	}
+}
+
+// -a short form behaves identically to --all.
+func TestRunAllShortFlag(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"-a"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(-a): code=%d; want 0", code)
+	}
+	if !strings.Contains(out.String(), filepath.Join(dir, "example")) {
+		t.Errorf("run(-a) stdout missing example dir:\n%s", out.String())
+	}
+}
+
+// --all --file: every skill's ABSOLUTE SKILL.md path, sorted by tag.
+func TestRunAllFilePrintsAllSourceFiles(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--all", "--file"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--all --file): code=%d; want 0", code)
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 paths; got %d: %q", len(lines), out.String())
+	}
+	if lines[0] != filepath.Join(dir, "example", "SKILL.md") {
+		t.Errorf("lines[0]=%q; want example SKILL.md (sorted)", lines[0])
+	}
+	if lines[1] != filepath.Join(dir, "writing", "reddit", "SKILL.md") {
+		t.Errorf("lines[1]=%q; want writing/reddit SKILL.md (sorted)", lines[1])
+	}
+}
+
+// --all --relative: every skill's directory path RELATIVE to the skills dir, sorted.
+func TestRunAllRelativePrintsAllRelative(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--all", "--relative"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--all --relative): code=%d; want 0", code)
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 paths; got %d: %q", len(lines), out.String())
+	}
+	if lines[0] != "example" {
+		t.Errorf("lines[0]=%q; want 'example' (relative)", lines[0])
+	}
+	if lines[1] != filepath.FromSlash("writing/reddit") {
+		t.Errorf("lines[1]=%q; want 'writing/reddit' (relative, OS-sep)", lines[1])
+	}
+}
+
+// --all with an EMPTY store -> prints nothing, exit 0 (PRD §6.1: --all is always
+// exit 0, UNLIKE --list which exits 1 "if no skills found" — --all is a scripting
+// command where empty output + exit 0 is the useful shape).
+func TestRunAllEmptyStoreExit0(t *testing.T) {
+	t.Setenv("SKPP_SKILLS_DIR", t.TempDir()) // exists, no SKILL.md
+	var out, errOut bytes.Buffer
+	code := run([]string{"--all"}, &out, &errOut)
+	if code != 0 {
+		t.Errorf("run(--all) empty: code=%d; want 0 (PRD §6.1 --all is always 0)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("run(--all) empty stdout=%q; want empty", out.String())
+	}
+}
+
+// --all when skills dir is unresolvable -> exit 1, empty stdout, the one-line fix.
+func TestRunAllSkillsDirUnresolvable(t *testing.T) {
+	unsetSkillsEnv(t)
+	t.Chdir(t.TempDir()) // all three §8 rules miss
+	var out, errOut bytes.Buffer
+	code := run([]string{"--all"}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(--all) unresolvable: code=%d; want 1", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "SKPP_SKILLS_DIR") {
+		t.Errorf("stderr=%q; want the one-line fix", errOut.String())
+	}
+}
+
+// --version precedes --all even when both are given (PRD §6.3).
+func TestRunVersionPrecedenceOverAll(t *testing.T) {
+	dir := sampleStore(t)
+	t.Setenv("SKPP_SKILLS_DIR", dir)
+	var out, errOut bytes.Buffer
+	code := run([]string{"--all", "--version"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--all --version): code=%d; want 0 (version precedence)", code)
+	}
+	if got := out.String(); got != "skpp "+version+"\n" {
+		t.Errorf("stdout=%q; want the version line (precedence over --all)", got)
+	}
+}

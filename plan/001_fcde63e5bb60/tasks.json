@@ -229,7 +229,7 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Tag resolution & path output (PRD §7.2, build order step 3)",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Implement the canonical contract: `skpp <tag>` resolves a tag to a skill and prints its absolute directory path. Covers the §7.2 resolution precedence (exact relTag -> basename -> frontmatter name -> alias), the critical §6.4 error contract (failed/ambiguous -> nothing on stdout, error to stderr, exit 1), and the path modifiers (--file, --relative, --all).",
           "tasks": [
             {
@@ -262,7 +262,7 @@
               "type": "Task",
               "id": "P1.M3.T8",
               "title": "main — tag resolution path output + modifiers",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Wire tag resolution into main.go: `skpp <tag> [...]` resolves each tag and prints one absolute path per line in input order, enforcing the §6.4 error contract (any failure -> nothing on stdout, errors to stderr, exit 1). Add the path modifiers --file/-f (print SKILL.md path), --relative (paths relative to skills dir), --all/-a (all skills sorted by tag), and --no-color passthrough.",
               "subtasks": [
                 {
@@ -288,7 +288,7 @@
                   "type": "Subtask",
                   "id": "P1.M3.T8.S2",
                   "title": "Modifiers: --file/-f, --relative, --all/-a",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M3.T8.S1"
