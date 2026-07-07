@@ -1747,3 +1747,121 @@ func TestRunShortBundleUnknownExit2(t *testing.T) {
 		t.Errorf("stderr=%q; want an 'unknown flag' message", errOut.String())
 	}
 }
+
+// --- exclusivityError: listing-mode mutual exclusivity (P1.M4.T2.S1, Issue 6) ---
+
+// exclusivityError directly: 2+ listing modes → bad; exactly 1 (or none) → ok;
+// modifiers never count. Locks the {path,list,search,all} set, the >=2 threshold,
+// and that --file/--no-color are invisible to the check.
+func TestExclusivityErrorListingModes(t *testing.T) {
+	cases := []struct {
+		name string
+		c    config
+		bad  bool
+	}{
+		{"none", config{}, false},
+		{"only path", config{path: true}, false},
+		{"only list", config{list: true}, false},
+		{"only search", config{searchMode: true}, false},
+		{"only all", config{all: true}, false},
+		{"path+list", config{path: true, list: true}, true},
+		{"path+search", config{path: true, searchMode: true}, true},
+		{"path+all", config{path: true, all: true}, true},
+		{"list+search", config{list: true, searchMode: true}, true},
+		{"list+all", config{list: true, all: true}, true},
+		{"search+all", config{searchMode: true, all: true}, true},
+		{"path+list+all (3 modes)", config{path: true, list: true, all: true}, true},
+		// modifiers + a single mode are NOT exclusive (modifiers don't count):
+		{"all+file (modifier)", config{all: true, file: true}, false},
+		{"list+noColor (modifier)", config{list: true, noColor: true}, false},
+		{"path+relative (modifier)", config{path: true, relative: true}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bad, msg := exclusivityError(tc.c)
+			if bad != tc.bad {
+				t.Errorf("exclusivityError(%s)=bad=%v,msg=%q; want bad=%v", tc.name, bad, msg, tc.bad)
+			}
+			if bad && !strings.Contains(msg, "mutually exclusive") {
+				t.Errorf("(%s) msg=%q; want it to contain 'mutually exclusive'", tc.name, msg)
+			}
+		})
+	}
+}
+
+// --- run: two listing modes → exit 2 (P1.M4.T2.S1, Issue 6) ---
+
+// --list --search foo → exit 2 (two listing modes). No store needed:
+// exclusivityError fires in run() before any dispatch, so the filesystem is
+// untouched. stderr names the conflicting family; stdout stays empty (§6.4).
+func TestRunExclusivityListAndSearch(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--list", "--search", "foo"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(--list --search foo): code=%d; want 2 (Issue 6)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty (§6.4)", out.String())
+	}
+	if !strings.Contains(errOut.String(), "mutually exclusive") {
+		t.Errorf("stderr=%q; want a 'mutually exclusive' message", errOut.String())
+	}
+}
+
+// --all --list → exit 2.
+func TestRunExclusivityAllAndList(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--all", "--list"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(--all --list): code=%d; want 2", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "mutually exclusive") {
+		t.Errorf("stderr=%q; want a 'mutually exclusive' message", errOut.String())
+	}
+}
+
+// --path --list → exit 2.
+func TestRunExclusivityPathAndList(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--path", "--list"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(--path --list): code=%d; want 2", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "mutually exclusive") {
+		t.Errorf("stderr=%q; want a 'mutually exclusive' message", errOut.String())
+	}
+}
+
+// All 6 pairs of {path,list,search,all} → exit 2 via run() (set-completeness
+// guard). Long forms only (no bundled shorts — those depend on P1.M4.T1.S1).
+func TestRunExclusivityListingModePairs(t *testing.T) {
+	pairs := [][]string{
+		{"--path", "--list"},
+		{"--path", "--search", "x"},
+		{"--path", "--all"},
+		{"--list", "--search", "x"},
+		{"--list", "--all"},
+		{"--search", "x", "--all"},
+	}
+	for _, args := range pairs {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			code := run(args, &out, &errOut)
+			if code != 2 {
+				t.Fatalf("run(%v): code=%d; want 2", args, code)
+			}
+			if out.Len() != 0 {
+				t.Errorf("stdout=%q; want empty", out.String())
+			}
+			if !strings.Contains(errOut.String(), "mutually exclusive") {
+				t.Errorf("stderr=%q; want 'mutually exclusive'", errOut.String())
+			}
+		})
+	}
+}

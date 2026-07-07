@@ -399,10 +399,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// 5) Normal mode dispatch (order unchanged): check → path → list →
-	//    search → all → tags. Each branch body is byte-identical to
-	//    pre-M5 (check is guaranteed standalone here: exclusivity caught
-	//    check+tags/check+mode).
+	// 5) Normal mode dispatch (order: path → list → search → check → all →
+	//    tags). Each branch body is byte-identical to pre-M5 (any mode that
+	//    reaches here is guaranteed standalone: exclusivityError caught
+	//    mode+mode/check+tags/check+mode above).
 
 	if c.path {
 		dir, src, err := skillsdir.Find()
@@ -617,16 +617,34 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 // exclusivityError reports whether c combines modes that PRD §6.3 forbids,
-// returning a one-line stderr message. It implements EXACTLY three families:
+// returning a one-line stderr message. It implements four families, checked in
+// order (first hit wins):
+//   - two or more listing modes among {--path, --list, --search, --all} — Issue 6
+//     (any 2+ are mutually exclusive; the previous silent dispatch precedence was
+//     surprising)
 //   - tags + a listing mode (--list/--search/--all) — PRD §6.3 explicit
 //   - check + tags — `check` ignores tags, so the combo is meaningless
 //   - check + a listing mode — modes are mutually exclusive
 //
-// Unspecified combos (e.g. --list --search with no tags) are deliberately NOT
-// flagged: PRD §6.3 scopes exclusivity to tag+mode, and mode+mode-without-tags
-// resolves deterministically by dispatch order (list wins today). --file/
-// --relative/--no-color are MODIFIERS and never trigger exclusivity.
+// `check` is NOT in the listing-mode set: check+mode is caught by the family
+// below, and check+path resolves by dispatch order (path wins) — out of scope
+// here. --file/--relative/--no-color are MODIFIERS and never trigger exclusivity
+// (they combine with a single mode, e.g. `--all --file`).
 func exclusivityError(c config) (bad bool, msg string) {
+	// Issue 6 (decisions.md §D6): any 2+ of the listing modes are mutually
+	// exclusive. Count the active ones; >= 2 is an error. Checked FIRST so a
+	// mode+mode combo gets the precise "listing modes" message even when tags are
+	// also present. The set is exactly {path, list, searchMode, all}; check and the
+	// modifiers are intentionally excluded (see the doc comment).
+	n := 0
+	for _, b := range []bool{c.path, c.list, c.searchMode, c.all} {
+		if b {
+			n++
+		}
+	}
+	if n >= 2 {
+		return true, "skpp: listing modes --path/--list/--search/--all are mutually exclusive"
+	}
 	hasTags := len(c.tags) > 0
 	if hasTags && (c.list || c.searchMode || c.all) {
 		return true, "skpp: tags cannot be combined with --list/--search/--all"

@@ -107,7 +107,7 @@
           "type": "Milestone",
           "id": "P1.M4",
           "title": "CLI Ergonomics Polish",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Resolve Issues 5 and 6 (both Minor UX): combined short flags and --flag=value syntax are rejected as unknown flags, and combining two listing modes silently picks one by dispatch order. Both touch main.go but different functions (parseArgs vs exclusivityError/run dispatch).",
           "tasks": [
             {
@@ -137,14 +137,14 @@
               "type": "Task",
               "id": "P1.M4.T2",
               "title": "Reject conflicting listing modes",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Extend exclusivityError to reject any combination of two or more listing modes (--path, --list, --search, --all), and fix the stale dispatch-order comment in main.go run().",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T2.S1",
                   "title": "Extend exclusivityError for mode+mode combos and fix stale dispatch comment",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/issue_analysis.md §Issue 6 and decisions.md §D6. exclusivityError (main.go:484-497) currently checks three families: tags+(list/search/all), check+tags, check+(list/search/all). It does NOT reject mode+mode combos like --list --search. The dispatch order in run() is path > list > search > check > all > tags (confirmed by the top-level if-chain: path=main.go:268, list=283, search=321, check=361, all=402, tags=433). The stale comment at main.go:266-267 (\"// 5) Normal mode dispatch (order unchanged): check → path → list → search → all → tags\") is WRONG — check is step 8 (after path/list/search), not first.\n2. INPUT: The existing exclusivityError function and config struct.\n3. LOGIC: In exclusivityError (main.go:484), add a 4th family BEFORE the existing checks: count how many of {c.path, c.list, c.searchMode, c.all} are true; if >= 2, return (true, \"skpp: listing modes --path/--list/--search/--all are mutually exclusive\"). Also fix the stale comment at main.go:266-267 to reflect the ACTUAL dispatch order: path → list → search → check → all → tags. Note: check is standalone-safe because exclusivityError already rejects check+mode and check+tags, so check's late position in dispatch is harmless.\n4. OUTPUT: `--list --search foo`, `--all --list`, `--path --list` now exit 2 with a clear message. Existing tags+mode, check+tags, check+mode exclusivity unchanged.\n5. TESTS (implied TDD): ADD main_test.go tests: run([\"--list\", \"--search\", \"foo\"]) → exit 2, stderr contains \"mutually exclusive\"; run([\"--all\", \"--list\"]) → exit 2; run([\"--path\", \"--list\"]) → exit 2. Existing exclusivity tests (TestRunExclusivity* or similar) must still pass. NOTE: this subtask and P1.M4.T1.S1 both modify main.go but touch different functions (exclusivityError/run vs parseArgs); if P1.M4.T1.S1 has already landed, line numbers may have shifted but the functions are non-overlapping.\n6. DOCS: [Mode A] none — no new flag surface; the exclusivity error message is runtime output, not documented config.",
@@ -169,14 +169,14 @@
               "type": "Task",
               "id": "P1.M5.T1",
               "title": "Align .gitignore with PRD §16 specification",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Trim the shipped .gitignore to the exact 5-entry set specified in PRD §16, removing the undocumented extras (/build, .env, .env.*, .pi-subagents/).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M5.T1.S1",
                   "title": "Trim .gitignore to the §16 spec set",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/issue_analysis.md §Issue 3 and decisions.md §D3. The current .gitignore has 9 entries in 4 sections. PRD §16 specifies EXACTLY these 5 entries (no comments, no sections): `/skpp`, `/dist`, `*.test`, `*.out`, `.DS_Store`. The extras to remove are: `/build`, `.env`, `.env.*`, `.pi-subagents/`. PRD.md cannot be modified (read-only, human-owned), so the implementation must conform to the spec.\n2. INPUT: The PRD §16 specification (the canonical 5-entry list).\n3. LOGIC: Overwrite .gitignore with exactly the 5 entries from §16, preserving the order and format from the PRD. Remove all section comments and extra entries.\n4. OUTPUT: `cat .gitignore` matches §16 exactly. `git status` may show .pi-subagents/ artifacts as untracked after this change — that is expected and correct (the spec does not ignore them).\n5. TESTS: Verify by diffing .gitignore against the §16 block in PRD.md. No Go tests.\n6. DOCS: [Mode A] none — .gitignore is itself the spec artifact.",
@@ -192,14 +192,14 @@
               "type": "Task",
               "id": "P1.M5.T2",
               "title": "Confirm check 'no SKILL.md' rule documentation",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Issue 7 is effectively moot: the §9 'skill dir has no SKILL.md' rule cannot fire because discover.Index only emits directories that contain SKILL.md. The check.go code already documents this as deliberate. Verify the comment is accurate and complete; no code change is required or desired (a heuristic would false-positive on legitimate grouping directories).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M5.T2.S1",
                   "title": "Verify check.go omission rationale is accurately documented",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/issue_analysis.md §Issue 7 and decisions.md §D7. check.go:123-129 already documents WHY the §9 'skill dir has no SKILL.md' rule is not implemented: discover.Index (index.go:46) defines a skill as 'any directory that directly contains SKILL.md' — a grouping dir without SKILL.md is simply never indexed, never checked. The §9 rule is REFRAMED in check.go:150 as 'invalid SKILL.md frontmatter' (an unreadable/malformed file is the actionable version). A heuristic (e.g. flagging dirs with scripts/ but no SKILL.md) would false-positive on legitimate grouping dirs.\n2. INPUT: The existing check.go doc comment (lines 123-129) and the check.go:150-151 reframed ERROR.\n3. LOGIC: Read check.go:123-129 and verify the comment accurately explains: (a) why the rule cannot fire (Index only emits dirs with SKILL.md), (b) why a heuristic is rejected (false-positives on grouping dirs), (c) that the rule is reframed as 'invalid SKILL.md frontmatter' (check.go:150). If the comment is already complete and accurate, NO code change is needed — this subtask is a verification gate that confirms the decision is documented. If the comment is unclear or incomplete, refine it ONLY to improve clarity (do not add code).\n4. OUTPUT: The check.go rationale comment is confirmed accurate (or clarified). No behavioral change. The §13 acceptance gate (`skpp check` reports example as OK) must still pass.\n5. TESTS: Run `go test ./internal/check/` and verify all pass. Run `./skpp check` and verify the example skill reports OK. No new tests needed.\n6. DOCS: [Mode A] The check.go comment IS the documentation for this decision. If clarified, the clarification rides with this subtask.",
