@@ -369,21 +369,21 @@
           "type": "Milestone",
           "id": "P1.M5",
           "title": "CLI surface & error semantics (PRD §6.3/§6.4, build order step 5)",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Lock down the full CLI contract: --help/-h usage text (to stdout, exit 0), no-args -> usage to stderr exit 1, unknown flags -> exit 2, and mutual exclusivity of modes (tags vs --list/--search/--all -> exit 2). This is the polish layer that makes the CLI's exit codes and stream discipline exactly match §6.3/§6.4.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M5.T11",
               "title": "Full CLI flag matrix, help text & exit-code/error semantics",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Finalize the arg parser: complete --help/-h usage text covering all flags/subcommands; enforce no-args (usage to stderr, exit 1), unknown flags (exit 2), and mode mutual exclusivity (positional tags mixed with --list/--search/--all -> exit 2). Ensure --help/--version take precedence over everything.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M5.T11.S1",
                   "title": "--help text + no-args/unknown-flag/mode-exclusivity exit codes",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M3.T8.S2",

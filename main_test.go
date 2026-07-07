@@ -91,15 +91,18 @@ func TestParseArgsAnyOrderBothForms(t *testing.T) {
 	}
 }
 
-// Unknown tokens are tolerated (no-op) for now; exit-2 lands in P1.M5.T11.
-// Dashed unknown flags are tolerated (no-op; exit-2 is M5). Non-dashed positional
-// tokens are now captured as <tag>s ("sometag"/"othertag" here). `check` is now a
-// RESERVED subcommand (P1.M4.T10.S1) and is NOT captured as a tag, so it is
-// deliberately excluded from this positional-capture test.
-func TestParseArgsUnknownTolerated(t *testing.T) {
+// Unknown dashed flags are now captured (P1.M5.T11.S1: exit 2). The FIRST
+// unknown offender wins; non-dashed positionals are still captured as <tag>s
+// ("sometag"/"othertag" here). `check` is a RESERVED subcommand (P1.M4.T10.S1)
+// and is NOT captured as a tag, so it is deliberately excluded from this
+// positional-capture test.
+func TestParseArgsUnknownFlagCaptured(t *testing.T) {
 	c := parseArgs([]string{"--frobnicate", "sometag", "othertag"})
 	if c.version || c.path {
 		t.Errorf("parseArgs(unknown): version=%v path=%v; want both false", c.version, c.path)
+	}
+	if c.unknownFlag != "--frobnicate" {
+		t.Errorf("unknownFlag=%q; want --frobnicate (first unknown captured)", c.unknownFlag)
 	}
 	// Non-dashed positionals are captured as tags; the dashed --frobnicate is excluded.
 	if len(c.tags) != 2 || c.tags[0] != "sometag" || c.tags[1] != "othertag" {
@@ -240,21 +243,37 @@ func TestRunVersionPrecedenceOverPath(t *testing.T) {
 
 // --- run: default (no recognized flag) ---
 
-// No args / unknown flags: tolerated for now, exit 1 (the eventual §6.3 no-args
-// code), no usage text yet (P1.M5.T11). NOT exit 2 (deferred to M5).
+// No args → usage to STDERR, exit 1, stdout empty (PRD §6.3: parity with
+// get-server-config.sh). The same usageText is used for --help (stdout/exit 0)
+// and no-args (stderr/exit 1); only the destination differs.
 func TestRunDefaultNoArgs(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(nil, &out, &errOut)
 	if code != 1 {
-		t.Errorf("run(nil): code=%d; want 1 (no-args default; usage text is M5)", code)
+		t.Errorf("run(nil): code=%d; want 1 (no-args → stderr usage, exit 1)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("run(nil) stdout=%q; want EMPTY (usage goes to stderr)", out.String())
+	}
+	if !strings.Contains(errOut.String(), "USAGE") {
+		t.Errorf("run(nil) stderr=%q; want the USAGE block", errOut.String())
 	}
 }
 
+// Unknown dashed flag → exit 2 (PRD §6 header), exact stderr line, stdout empty
+// (§6.4 discipline so $(...) never sees garbage).
 func TestRunDefaultUnknownFlag(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run([]string{"--frobnicate"}, &out, &errOut)
-	if code != 1 {
-		t.Errorf("run(--frobnicate): code=%d; want 1 (unknown tolerated; exit-2 is M5)", code)
+	if code != 2 {
+		t.Fatalf("run(--frobnicate): code=%d; want 2 (unknown flag, PRD §6)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY (§6.4: nothing on stdout on exit-2)", out.String())
+	}
+	want := "skpp: unknown flag '--frobnicate'\n"
+	if got := errOut.String(); got != want {
+		t.Errorf("stderr=%q; want %q", got, want)
 	}
 }
 
@@ -386,11 +405,15 @@ func TestParseArgsCapturesTagsInOrder(t *testing.T) {
 	}
 }
 
-// Dashed unknowns are NOT tags (they are tolerated flags); only the positional is captured.
+// Dashed unknowns are NOT tags; only the positional is captured. The FIRST
+// unknown offender wins (--frobnicate before -x).
 func TestParseArgsDashedUnknownNotATag(t *testing.T) {
 	c := parseArgs([]string{"--frobnicate", "real-tag", "-x"})
 	if len(c.tags) != 1 || c.tags[0] != "real-tag" {
 		t.Errorf("tags=%v; want [real-tag] (dashed tokens excluded)", c.tags)
+	}
+	if c.unknownFlag != "--frobnicate" {
+		t.Errorf("unknownFlag=%q; want --frobnicate (first of two unknowns wins)", c.unknownFlag)
 	}
 }
 
@@ -1084,8 +1107,9 @@ func TestParseArgsCheckAfterFlag(t *testing.T) {
 	}
 }
 
-// `check` + a later positional: check wins in dispatch (pre-M5; M5 makes this exit 2).
-// Here we only assert both are captured as set; run() ordering is tested below.
+// `check` + a later positional: parseArgs captures both (run() now rejects this
+// combo with exit 2 — see TestRunExclusivityCheckAndTags). Here we only assert
+// both are captured as set; run() ordering/exclusivity is tested below.
 func TestParseArgsCheckAndTagBothCaptured(t *testing.T) {
 	c := parseArgs([]string{"check", "sometag"})
 	if !c.check {
@@ -1273,5 +1297,214 @@ func TestRunTagStillResolvesAlongsideCheck(t *testing.T) {
 	}
 	if !strings.HasSuffix(out.String(), "/example\n") {
 		t.Errorf("run(example) stdout=%q; want .../example dir", out.String())
+	}
+}
+
+// --- parseArgs: --help/-h, first-unknown-wins, short unknown (P1.M5.T11.S1) ---
+
+func TestParseArgsHelpLong(t *testing.T) {
+	if c := parseArgs([]string{"--help"}); !c.help {
+		t.Errorf("parseArgs(--help): help=false; want true")
+	}
+}
+
+func TestParseArgsHelpShort(t *testing.T) {
+	if c := parseArgs([]string{"-h"}); !c.help {
+		t.Errorf("parseArgs(-h): help=false; want true")
+	}
+}
+
+func TestParseArgsFirstUnknownWins(t *testing.T) {
+	if c := parseArgs([]string{"--bogus", "--more"}); c.unknownFlag != "--bogus" {
+		t.Errorf("unknownFlag=%q; want --bogus (first unknown wins)", c.unknownFlag)
+	}
+}
+
+func TestParseArgsShortUnknownCaptured(t *testing.T) {
+	if c := parseArgs([]string{"-x"}); c.unknownFlag != "-x" {
+		t.Errorf("unknownFlag=%q; want -x", c.unknownFlag)
+	}
+}
+
+// --- run: --help / -h (P1.M5.T11.S1) ---
+
+// --help → full usage to STDOUT (USAGE/EXAMPLES/OPTIONS + the canonical
+// pi --skill "$(skpp example)" one-liner), exit 0, stderr empty, PLAIN (no ANSI).
+func TestRunHelpToStdoutExit0(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--help"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--help): code=%d; want 0", code)
+	}
+	got := out.String()
+	for _, want := range []string{"USAGE:", "EXAMPLES:", "OPTIONS:", `pi --skill "$(skpp example)"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("run(--help) stdout missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("help must be PLAIN (no ANSI):\n%s", got)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("run(--help) stderr=%q; want empty", errOut.String())
+	}
+}
+
+func TestRunHelpShortFlag(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"-h"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(-h): code=%d; want 0", code)
+	}
+	if !strings.Contains(out.String(), "USAGE:") {
+		t.Errorf("run(-h) stdout missing USAGE block:\n%s", out.String())
+	}
+}
+
+// "help wins" tiebreak: --help beats --version (stdout is the help block, NOT
+// the version line).
+func TestRunHelpBeatsVersion(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--help", "--version"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--help --version): code=%d; want 0", code)
+	}
+	if strings.Contains(out.String(), "skpp "+version) {
+		t.Errorf("help must beat version; got the version line:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "USAGE:") {
+		t.Errorf("stdout should be the help block, not the version:\n%s", out.String())
+	}
+}
+
+// --- run: no-args / modifiers-only (P1.M5.T11.S1) ---
+
+// Modifiers-only with no mode (e.g. `--no-color` alone) is the SAME as no-args:
+// skpp was asked to DO nothing → usage to stderr, exit 1, stdout empty.
+func TestRunModifiersOnlyNoMode(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--no-color"}, &out, &errOut)
+	if code != 1 {
+		t.Errorf("run(--no-color): code=%d; want 1 (no mode → stderr usage)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "USAGE") {
+		t.Errorf("stderr=%q; want usage block", errOut.String())
+	}
+}
+
+// --- run: unknown flag → exit 2 (P1.M5.T11.S1) ---
+
+func TestRunUnknownShortFlagExit2(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"-z"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(-z): code=%d; want 2", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+	if got := errOut.String(); got != "skpp: unknown flag '-z'\n" {
+		t.Errorf("stderr=%q; want the exact unknown-flag line", got)
+	}
+}
+
+// --version still beats unknown flag (precedence: help → version → unknown).
+func TestRunVersionBeatsUnknownFlag(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--version", "--bogus"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--version --bogus): code=%d; want 0 (version precedence)", code)
+	}
+	if got := out.String(); got != "skpp "+version+"\n" {
+		t.Errorf("stdout=%q; want the version line (version beats unknown flag)", got)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr=%q; want empty (version won; unknown flag not reported)", errOut.String())
+	}
+}
+
+// --help beats unknown flag (precedence: help wins over everything).
+func TestRunHelpBeatsUnknownFlag(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--help", "--bogus"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--help --bogus): code=%d; want 0 (help precedence)", code)
+	}
+	if !strings.Contains(out.String(), "USAGE:") {
+		t.Errorf("stdout should be help, not an unknown-flag error:\n%s", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr=%q; want empty (help won)", errOut.String())
+	}
+}
+
+// --- run: mode mutual exclusivity → exit 2 (P1.M5.T11.S1) ---
+
+// tags + --list (PRD §6.3 explicit: these are mutually exclusive modes).
+func TestRunExclusivityTagsAndList(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"foo", "--list"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(foo --list): code=%d; want 2", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "cannot be combined") {
+		t.Errorf("stderr=%q; want an exclusivity message", errOut.String())
+	}
+}
+
+// tags + --search q (PRD §6.3).
+func TestRunExclusivityTagsAndSearch(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"foo", "--search", "q"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(foo --search q): code=%d; want 2", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+}
+
+// tags + --all (PRD §6.3).
+func TestRunExclusivityTagsAndAll(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"foo", "--all"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(foo --all): code=%d; want 2", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+}
+
+// check + tag (check ignores tags so the combo is meaningless → exit 2).
+func TestRunExclusivityCheckAndTags(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"check", "foo"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(check foo): code=%d; want 2 (check + tag)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "check") {
+		t.Errorf("stderr=%q; want a message mentioning check", errOut.String())
+	}
+}
+
+// check + a listing mode (modes are mutually exclusive → exit 2).
+func TestRunExclusivityCheckAndList(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"check", "--list"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(check --list): code=%d; want 2 (check + mode)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want empty", out.String())
 	}
 }

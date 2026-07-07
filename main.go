@@ -40,6 +40,57 @@ import (
 // linker symbol path is `main.version` (NOT the module import path).
 var version = "dev"
 
+// usageText is the full --help / no-args usage block (PRD §6.1, §6.3). It mirrors
+// the STRUCTURE of mcpeepants get-server-config.sh (USAGE / EXAMPLES / OPTIONS,
+// aligned columns) but lists the full skpp §6 flag matrix and the canonical
+// pi --skill "$(skpp <tag>)" one-liner. It is emitted PLAIN (no ANSI):
+// `skpp --help | grep` must work, §13 does not assert on help color, and tests
+// use non-TTY buffers. The SAME text is printed to stdout for --help (exit 0) and
+// to stderr for the no-args default (exit 1) — only the destination differs.
+const usageText = `skpp — skill path printer
+
+Resolve skill tags to on-disk skill directory paths (manifest-free).
+
+USAGE:
+  skpp <tag> [<tag>...]
+  skpp --all
+  skpp --list
+  skpp --search <query>
+  skpp check
+  skpp --path
+  skpp --help
+  skpp --version
+
+EXAMPLES:
+  pi --skill "$(skpp example)"
+  pi --skill "$(skpp writing/reddit)"
+  skpp example reddit          # one absolute path per line, input order
+  skpp -f example              # print the SKILL.md path
+  skpp --relative --all        # every skill path, relative to the skills dir
+  skpp --list                  # human-readable catalog
+  skpp --search reddit         # substring search over tag/name/description/keywords
+  skpp check                   # validate every skill on disk
+
+OPTIONS:
+  <tag> [<tag>...]   Resolve tags to skill directory paths (one absolute path per line)
+  --all, -a          Print every skill's directory path, sorted by tag
+  --list, -l         Human-readable catalog (TAG, NAME, DESCRIPTION)
+  --search <q>, -s   Substring search over tag / name / description / keywords
+  check              Validate every skill on disk (report OK / WARN / ERROR)
+  --path, -p         Print the resolved skills directory
+  --file, -f         Print the SKILL.md path instead of the directory (modifier)
+  --relative         Print paths relative to the skills directory (modifier)
+  --no-color         Disable ANSI color even on a TTY (modifier)
+  --help, -h         Show this help message
+  --version, -v      Print the skpp version
+
+Exit codes: 0 success/help/version | 1 unresolved/no skills/unresolvable dir | 2 unknown flag / mutually-exclusive modes
+`
+
+// usage returns the help block. A tiny indirection so the constant is wrapped by
+// a function (keeps the print sites uniform: fmt.Fprint(w, usage())).
+func usage() string { return usageText }
+
 // isTerminal reports whether w is an interactive terminal (a character device).
 // It decides whether --list/--search emit ANSI color by default (PRD §6.2: color
 // is on for a TTY unless --no-color is set). It type-asserts w to *os.File and
@@ -65,24 +116,23 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// config holds the parsed CLI flags. Grown by later milestones as more of the
-// PRD §6.1/§6.2 matrix lands. This version sets version, path, list, noColor,
-// tags, and the S2 modifiers all/file/relative; every other token is a tolerated
-// no-op (P1.M5.T11 turns unknown flags into exit 2 and adds subcommand handling).
+// config holds the parsed CLI flags (PRD §6.1/§6.2 matrix). This subtask
+// (P1.M5.T11.S1) completes the matrix by adding help and unknownFlag, the final
+// two fields needed for the §6.3 precedence + the §6-header unknown-flag rule.
 type config struct {
-	version    bool     // --version / -v : print "skpp <version>" and exit 0
-	path       bool     // --path / -p    : print resolved skills dir and exit 0/1
-	list       bool     // --list / -l    : print the human-readable catalog table (§6.1)
-	all        bool     // --all / -a     : print every skill's directory path, one per line (§6.1) [NEW]
-	file       bool     // --file / -f    : print the SKILL.md path instead of the dir path (§6.2) [NEW]
-	relative   bool     // --relative     : print paths relative to the skills dir, not absolute (§6.2) [NEW]
-	noColor    bool     // --no-color     : disable ANSI color even on a TTY (§6.2)
-	tags       []string // positional <tag> args (PRD §6.1 `skpp <tag> [<tag>...]`); resolved in run
-	searchMode bool     // --search <q>/-s : substring search over tag/name/description/keywords (§6.1)
-	searchQ    string   // the --search query value (consumed from the token after --search/-s)
-	check      bool     // `skpp check` subcommand: validate every skill in the store (§9) [NEW]
-	// Future (M5), do NOT add yet:
-	//   help bool
+	version     bool     // --version / -v : print "skpp <version>" and exit 0
+	help        bool     // --help / -h    : print usage to STDOUT and exit 0 (§6.1, §6.3 "help wins" tiebreak)
+	path        bool     // --path / -p    : print resolved skills dir and exit 0/1
+	list        bool     // --list / -l    : print the human-readable catalog table (§6.1)
+	all         bool     // --all / -a     : print every skill's directory path, one per line (§6.1)
+	file        bool     // --file / -f    : print the SKILL.md path instead of the dir path (§6.2)
+	relative    bool     // --relative     : print paths relative to the skills dir, not absolute (§6.2)
+	noColor     bool     // --no-color     : disable ANSI color even on a TTY (§6.2)
+	searchMode  bool     // --search <q>/-s : substring search over tag/name/description/keywords (§6.1)
+	searchQ     string   // the --search query value (consumed from the token after --search/-s)
+	check       bool     // `skpp check` subcommand: validate every skill in the store (§9)
+	tags        []string // positional <tag> args (PRD §6.1 `skpp <tag> [<tag>...]`); resolved in run
+	unknownFlag string   // first unknown dashed token, "" if none (§6 header → exit 2)
 }
 
 // parseArgs scans argv tokens and fills a config. Flags may appear in any order
@@ -102,6 +152,11 @@ func parseArgs(args []string) config {
 		switch a {
 		case "--version", "-v":
 			c.version = true
+		case "--help", "-h":
+			// --help takes precedence over everything else except itself (PRD §6.3
+			// "help wins" tiebreak: checked FIRST in run, before --version). Help is
+			// emitted PLAIN to stdout, exit 0.
+			c.help = true
 		case "--path", "-p":
 			c.path = true
 		case "--list", "-l":
@@ -116,11 +171,11 @@ func parseArgs(args []string) config {
 			c.noColor = true
 		case "--search", "-s":
 			// Value-taking flag: consume the NEXT token verbatim as the query. The
-			// value is NOT appended to c.tags (i++ skips it). If --search is the
-			// LAST token (no value follows) searchMode stays false and the call
-			// falls through to the no-recognized-mode default (exit 1); the proper
-			// "flag requires an argument" exit-2 is P1.M5.T11. A value starting with
-			// '-' (e.g. `--search -x`) is grabbed as the literal query "-x".
+			// value is NOT appended to c.tags (i++ skips it), and it never reaches
+			// the default branch, so a dashed value (e.g. `--search -x` → query
+			// "-x") is NOT mistaken for an unknown flag. If --search is the LAST
+			// token (no value follows) searchMode stays false and the call falls
+			// through to the no-recognized-mode default (exit 1).
 			if i+1 < len(args) {
 				c.searchMode = true
 				c.searchQ = args[i+1]
@@ -130,18 +185,23 @@ func parseArgs(args []string) config {
 			// `skpp check` subcommand (PRD §9). `check` is a RESERVED positional
 			// token: it selects validation mode and is NOT captured as a tag. A
 			// skill literally tagged `check` cannot be resolved via `skpp check`
-			// (subcommand names are reserved, as in any CLI). P1.M5.T11 turns
-			// `check` mixed with tags/--list/--search/--all into a §6.3 exit-2
-			// error; for now check wins silently in run() dispatch (mirrors how
-			// searchMode currently wins over tags).
+			// (subcommand names are reserved, as in any CLI). Captured ANYWHERE in
+			// argv (so `--no-color check` still selects check); run()'s
+			// exclusivity check rejects check+tags / check+mode with exit 2. A
+			// nested skill `writing/check` still resolves: this case matches only
+			// the EXACT token "check".
 			c.check = true
 		default:
 			// Positional <tag> (PRD §6.1 `skpp <tag> [<tag>...]`): a token that
 			// does NOT start with '-' is a tag, captured here and resolved in run.
-			// Dashed unknowns (e.g. --frobnicate) also fall through to this default
-			// and are tolerated (no-op); P1.M5.T11 turns them into exit 2 and adds
-			// §6.3 mutual-exclusivity (tag mixed with --list/--search/--all).
-			if !strings.HasPrefix(a, "-") {
+			// A dashed token NOT in the known set is an unknown flag (PRD §6 header:
+			// exit 2): capture the FIRST offender for run() to report. Do NOT collect
+			// a slice of unknowns — one loud error is the §6 contract.
+			if strings.HasPrefix(a, "-") {
+				if c.unknownFlag == "" {
+					c.unknownFlag = a
+				}
+			} else {
 				c.tags = append(c.tags, a)
 			}
 		}
@@ -153,23 +213,57 @@ func parseArgs(args []string) config {
 // call os.Exit(run(...)) without tests ever invoking os.Exit. stdout/stderr are
 // injected so tests capture output via *bytes.Buffer instead of the real streams.
 //
-// Exit codes (PRD §6; this subtask's slice):
-//   - 0: --version printed; --path succeeded; --list printed the catalog; all
-//     <tag>s resolved (one absolute path per line printed); --all printed the store
-//   - 1: --path/--list failed; ANY <tag> unresolved/ambiguous (nothing on stdout);
-//     skills dir unresolvable; default (no recognized flag)
-//   - 2: (DEFERRED to P1.M5.T11) unknown flag / mutually-exclusive modes mixed
+// Exit codes (PRD §6; final §6.1–§6.4 matrix):
+//   - 0: --help printed usage to stdout; --version printed; --path/--list/--search
+//     succeeded; all <tag>s resolved; --all printed the store; check passed
+//   - 1: --path/--list failed or had no skills; ANY <tag> unresolved/ambiguous
+//     (nothing on stdout); skills dir unresolvable; no recognized mode (usage to
+//     stderr)
+//   - 2: unknown flag; mutually-exclusive modes mixed (tags+mode, check+tags,
+//     check+mode)
 //
-// Precedence (PRD §6.3): --version (and, in M5, --help) win over everything.
+// Precedence (PRD §6.3 "--help / --version take precedence over everything else"
+//   - the conventional help-wins tiebreak):
+//     help → version → unknownFlag → exclusivity → dispatch → no-args-usage.
 func run(args []string, stdout, stderr io.Writer) int {
 	c := parseArgs(args)
 
-	// Precedence tier: --version wins over every other flag (PRD §6.3).
-	// P1.M5.T11 adds --help/-h to this same tier (before --path).
+	// 1) --help takes precedence over EVERYTHING, including --version (the
+	//    "help wins" tiebreak) and unknown flags (PRD §6.3). Usage to STDOUT,
+	//    exit 0. Help is PLAIN (no ANSI) unconditionally.
+	if c.help {
+		fmt.Fprint(stdout, usage())
+		return 0
+	}
+
+	// 2) --version next (PRD §6.3: precedes everything except --help).
 	if c.version {
 		fmt.Fprintf(stdout, "skpp %s\n", version)
 		return 0
 	}
+
+	// 3) Unknown dashed flag → exit 2 (PRD §6 header). stdout stays EMPTY (§6.4
+	//    discipline: `pi --skill "$(skpp --bogus)"` must fail loudly, not pass a
+	//    garbage path). Reported AFTER --help/--version so those still win.
+	if c.unknownFlag != "" {
+		fmt.Fprintf(stderr, "skpp: unknown flag '%s'\n", c.unknownFlag)
+		return 2
+	}
+
+	// 4) Mode mutual exclusivity → exit 2 (PRD §6.3). Checked AFTER unknown-flag
+	//    so `--bogus foo --list` reports the unknown flag first (both exit 2; the
+	//    unknown flag is the more fundamental error). Only three families: tags+
+	//    a listing mode (§6.3 explicit); check+tags; check+mode (check ignores
+	//    tags so the combo is meaningless — modes are mutually exclusive).
+	if bad, msg := exclusivityError(c); bad {
+		fmt.Fprintln(stderr, msg)
+		return 2
+	}
+
+	// 5) Normal mode dispatch (order unchanged): check → path → list →
+	//    search → all → tags. Each branch body is byte-identical to
+	//    pre-M5 (check is guaranteed standalone here: exclusivity caught
+	//    check+tags/check+mode).
 
 	if c.path {
 		dir, _, err := skillsdir.Find() // src is for reporting only; not printed
@@ -369,11 +463,36 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	// No recognized mode. PRD §6.3 no-args behavior is "usage to stderr, exit 1";
-	// the usage text and the unknown-flag -> exit 2 rule both land in P1.M5.T11.
-	// For now, exit 1 silently (matches the eventual no-args code) so unknown
-	// flags are "tolerated" (not exit 2) per this subtask's contract.
+	// No recognized mode → usage to STDERR, exit 1 (PRD §6.3: parity with
+	// get-server-config.sh). Covers both truly-no-args and modifiers-only (e.g.
+	// `skpp --no-color`): if skpp was asked to DO nothing, show usage. stdout stays
+	// empty so $(...) never sees garbage.
+	fmt.Fprint(stderr, usage())
 	return 1
+}
+
+// exclusivityError reports whether c combines modes that PRD §6.3 forbids,
+// returning a one-line stderr message. It implements EXACTLY three families:
+//   - tags + a listing mode (--list/--search/--all) — PRD §6.3 explicit
+//   - check + tags — `check` ignores tags, so the combo is meaningless
+//   - check + a listing mode — modes are mutually exclusive
+//
+// Unspecified combos (e.g. --list --search with no tags) are deliberately NOT
+// flagged: PRD §6.3 scopes exclusivity to tag+mode, and mode+mode-without-tags
+// resolves deterministically by dispatch order (list wins today). --file/
+// --relative/--no-color are MODIFIERS and never trigger exclusivity.
+func exclusivityError(c config) (bad bool, msg string) {
+	hasTags := len(c.tags) > 0
+	if hasTags && (c.list || c.searchMode || c.all) {
+		return true, "skpp: tags cannot be combined with --list/--search/--all"
+	}
+	if c.check && hasTags {
+		return true, "skpp: 'check' cannot be combined with tag arguments"
+	}
+	if c.check && (c.list || c.searchMode || c.all) {
+		return true, "skpp: 'check' cannot be combined with --list/--search/--all"
+	}
+	return false, ""
 }
 
 // skillPath returns the path to print for a resolved skill, applying the PRD §6.2
