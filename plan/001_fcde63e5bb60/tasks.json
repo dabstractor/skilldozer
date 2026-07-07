@@ -498,14 +498,14 @@
               "type": "Task",
               "id": "P1.M6.T15",
               "title": "Shell completions — bash/zsh/fish (§14)",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Ship dynamic completions for bash, zsh, and fish that complete flags/subcommands AND tags (by invoking `skpp --all`, disk-derived, no hardcoded tag list — manifest-free). Mirrors mcpeepants completion-file structure but with dynamic tag sourcing. May be deferred per PRD §14 but flag clearly if so.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M6.T15.S1",
                   "title": "completions/skpp.bash + _skpp (zsh) + skpp.fish (dynamic tags)",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M3.T8.S2"
