@@ -1,0 +1,241 @@
+{
+  "backlog": [
+    {
+      "type": "Phase",
+      "id": "P1",
+      "title": "Conform existing skilldozer to the current PRD §8 config model and sync residual drift",
+      "status": "Ready",
+      "description": "Re-planning pass. The skilldozer CLI is already ~90% built and working (binary builds; --version/--path/--list/tag resolution/check/completions/install.sh/README/LICENSE/.gitignore all exist and pass). The PRD evolved after the original skpp build: it was renamed to skilldozer and gained a major new §8 (Locating the skills directory) featuring a settings config file and an `init` subcommand. The code was only partially updated. This phase closes the full gap: (1) add the §8.1 config-file mechanism and insert it as discovery rule #2 (5-rule priority), (2) implement the §8.2 `init` subcommand, (3) sync residual skpp drift in the example skill and shell completions, and (4) sync changeset-level docs (README) and run the §13 acceptance gate. Grounded in architecture/{system_context,code_prd_delta,external_deps,docs_and_assets_drift}.md. All work assumes TDD per subtask (failing test -> impl -> pass); no separate 'write tests' subtasks.",
+      "milestones": [
+        {
+          "type": "Milestone",
+          "id": "P1.M1",
+          "title": "Skills-dir config discovery — §8.1 config-file mechanism + §8.3 5-rule priority",
+          "status": "Planned",
+          "description": "The foundation. Today internal/skillsdir/skillsdir.go implements only 3 discovery rules (env -> sibling -> walk-up) and an old ErrNotFound message. PRD §8.3 now requires 5 rules with a new config-file rule at priority #2. This milestone adds the internal/config package (read/write/path/default-store) as the dependency root, adds the SourceConfig enum + label, exports HasSkillMD for reuse by init, and wires findConfig into Find() at priority #2 with the exact PRD unconfigured message. No main.go / UX changes here (those land in M2).",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M1.T1",
+              "title": "internal/config package — read/write the settings config file + resolve its path and default store",
+              "status": "Planned",
+              "description": "Create a new internal/config package that owns the YAML settings file (the ONE permitted settings sidecar, distinct from the forbidden catalog index). It must read/write a {store: <abs path>} file, resolve the config file location (XDG_CONFIG_HOME, SKILLDOZER_CONFIG override), and resolve the default store location (XDG_DATA_HOME, hand-computed since there is no os.UserDataDir). Depends on nothing internal; both skillsdir (M1.T2) and main/init (M2) consume it.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S1",
+                  "title": "config.File struct + Load + Save (yaml.v3 lenient read/write)",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [],
+                  "prd_selectors": ["h2.1", "h2.7", "h3.7", "h3.8", "h2.3"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/external_deps.md §1 — the repo already uses this exact idiom in internal/discover/discover.go (yaml.Unmarshal ignores unknown keys by default). Reuse that lenient convention. See architecture/code_prd_delta.md G5. yaml.v3 is already pinned in go.mod (the only non-stdlib dep); do NOT add any dependency.\n2. INPUT: None (new package, dependency root). Path strings come in as function args.\n3. LOGIC: Create package `config`. Define `type File struct { Store string \\`yaml:\"store,omitempty\"\\` }`. `Load(path string) (File, error)` reads the file with os.ReadFile and yaml.Unmarshal's into File; a missing file must be distinguishable (return the os.ReadFile error so callers can test errors.Is(err, fs.ErrNotExist) — do NOT mask it); a syntactically-broken YAML is a hard error but unknown KEYS are silently ignored (default lenient decode, do NOT call KnownFields(true)). `Save(path string, f File) error` does yaml.Marshal(&f) then os.MkdirAll(filepath.Dir(path), 0o755) then os.WriteFile(path, out, 0o644). Field order on disk = struct field order; a File{Store:\"/x\"} marshals to exactly `store: /x\\n`.\n4. OUTPUT: Exported `config.File`, `config.Load`, `config.Save`. Consumed by P1.M1.T2.S2 (findConfig reads via Load) and P1.M2.T2.S2 (init writes via Save). Ship config_test.go covering: round-trip Save->Load equality; unknown keys ignored (load a file with extra keys into File, Store still set); fs.ErrNotExist returned (not masked) when file absent.\n5. DOCS: none — no user-facing/config surface change (internal package). Package doc comment (// Package config …) is the only doc; describe it as the settings sidecar for the store location, explicitly NOT a catalog index (PRD §2/§17)."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S2",
+                  "title": "config.Path() + config.DefaultStore() — XDG-aware config-file path and default store dir",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T1.S1"],
+                  "prd_selectors": ["h2.7", "h3.8", "h3.9", "h3.10"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/external_deps.md §2 — os.UserConfigDir() implements the $XDG_CONFIG_HOME -> ~/.config rule for free (and rejects a relative $XDG_CONFIG_HOME); there is NO os.UserDataDir(), so $XDG_DATA_HOME -> ~/.local/share must be computed by hand (require absolute when set, else fall back to os.UserHomeDir()+\"/.local/share\").\n2. INPUT: Environment: SKILLDOZER_CONFIG, XDG_CONFIG_HOME, XDG_DATA_HOME, HOME (read via os.Getenv / os.UserConfigDir / os.UserHomeDir).\n3. LOGIC: `Path() (string, error)`: if SKILLDOZER_CONFIG is set and non-empty, return filepath.Clean of it AS-IS (it is the literal config file path, absolute or relative — do not join); else configHome, err := os.UserConfigDir(); on err return (\"\", err); return filepath.Join(configHome, \"skilldozer\", \"config.yaml\"). `DefaultStore() (string, error)`: if v := os.Getenv(\"XDG_DATA_HOME\"); v != \"\" && filepath.IsAbs(v) -> base=v; else home, err := os.UserHomeDir(); on err return (\"\", err); base=filepath.Join(home,\".local\",\"share\"); return filepath.Join(base, \"skilldozer\", \"skills\"). Define string consts configEnv = \"SKILLDOZER_CONFIG\" (exported or package-internal as needed by main) and reuse skilldozer's existing SKILLDOZER_SKILLS_DIR name only in skillsdir, not here.\n4. OUTPUT: Exported `config.Path`, `config.DefaultStore`, and the `SKILLDOZER_CONFIG` constant name. Consumed by P1.M1.T2.S2 (findConfig uses Path) and P1.M2.T2.S1/S2 (init uses DefaultStore + Path + Save). Tests via t.Setenv: Path honors SKILLDOZER_CONFIG override and the XDG default; DefaultStore honors an absolute XDG_DATA_HOME and falls back to ~/.local/share.\n5. DOCS: none — internal helper (no user-facing surface). The SKILLDOZER_CONFIG env var's user-facing description is documented later in README (P1.M4.T2.S1, Mode B) — do not duplicate here."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T2",
+              "title": "Wire the config-file rule into skillsdir.Find() and adopt the 5-rule priority + new unconfigured message",
+              "status": "Planned",
+              "description": "Extend internal/skillsdir/skillsdir.go from 3 rules to the PRD §8.3 5-rule ladder: env -> config file -> sibling -> walk-up -> ErrNotFound. Add the SourceConfig enum value and its 'config file' --path label, refresh the stale package/Find() doc comments, export HasSkillMD for reuse by init, implement findConfig() consuming the new config package, and replace the old ErrNotFound hint with the exact PRD string. The behavior of the existing 3 rules is unchanged (only their priority position shifts down by one).",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T2.S1",
+                  "title": "Add SourceConfig enum value + 'config file' label + refresh doc comments + export HasSkillMD",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [],
+                  "prd_selectors": ["h2.7", "h3.8", "h3.10"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/code_prd_delta.md G2/G3/G12/G14 and the current Source enum at internal/skillsdir/skillsdir.go:25-52 (SourceEnv=0, SourceSibling, SourceWalkUp). hasSkillMD is at skillsdir.go:139-166, currently unexported. Insert SourceConfig between SourceEnv and SourceSibling so iota order tracks priority order.\n2. INPUT: None (type/enum/doc changes only).\n3. LOGIC: (a) Add `SourceConfig` to the const block immediately after SourceEnv (so the values are Env=0, Config=1, Sibling=2, WalkUp=3). (b) Add `case SourceConfig: return \"config file\"` to Source.String() (PRD §8.3 enumerates exactly four labels: SKILLDOZER_SKILLS_DIR, config file, sibling of binary, ancestor of cwd). (c) Update the package doc comment (skillsdir.go:3-7) and the Find() doc comment (skillsdir.go:218-231) from '3 rules' to the 5-rule ladder env -> config -> sibling -> walk-up -> unconfigured-hint. (d) Export the cwd-auto-detect predicate: rename the existing `hasSkillMD` to `HasSkillMD` (exported) and update its single internal caller findWalkUpAncestor — OR add a thin exported `HasSkillMD` that delegates to the existing private fn; either way the public symbol `HasSkillMD(dir string) bool` must exist for P1.M2.T2.S1 (init cwd-detect) to consume.\n4. OUTPUT: Exported `skillsdir.SourceConfig` and `skillsdir.HasSkillMD`; refreshed doc comments; the 'config file' label. Consumed by P1.M1.T2.S2 (Find uses SourceConfig) and P1.M2.T2.S1 (init uses HasSkillMD). Update skillsdir_test.go TestSourceString to assert {SourceConfig, \"config file\"}.\n5. DOCS: none — no user-facing surface (the --path stderr label is surfaced by main.go unchanged once Source.String() returns it; that behavior already exists at main.go:421)."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T2.S2",
+                  "title": "Implement findConfig() rule and wire it into Find() at priority #2; set the exact ErrNotFound message",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T1.S1", "P1.M1.T1.S2", "P1.M1.T2.S1"],
+                  "prd_selectors": ["h2.1", "h2.7", "h3.8", "h3.9", "h3.10", "h2.12"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/code_prd_delta.md G1/G4/G5/G16 and architecture/external_deps.md §1/§2. The §13 acceptance gate greps the unconfigured stderr for `` run `skilldozer init` `` and greps --path for the store path / the SKILLDOZER_SKILLS_DIR label; both depend on this subtask. PRD §8.1: a missing/unreadable config OR a missing `store` key OR a non-existent store dir must fall through silently to the next rule (never a hard error).\n2. INPUT: config.Path() (string,error) and config.Load(path) (config.File,error) from P1.M1.T1; skillsdir.SourceConfig from P1.M1.T2.S1. The existing findEnv (rule 1), findSibling (was #2, now #3), findWalkUp (was #3, now #4) helpers — leave their behavior unchanged, only their call position moves.\n3. LOGIC: Add `findConfig() (dir string, src Source, found bool)`: p, err := config.Path(); if err != nil -> return \"\",0,false (no bootstrap path -> fall through). f, err := config.Load(p); if err != nil (incl. fs.ErrNotExist) -> return \"\",0,false (not yet configured -> fall through, never hard error). If f.Store == \"\" -> return \"\",0,false (missing key -> fall through). Absolutize: if filepath.IsAbs(f.Store) use it, else resolve it against filepath.Dir(p) (PRD §8.1: store may be relative to the config file). os.Stat the resolved store; if not an existing dir -> return \"\",0,false. Else return (absStore, SourceConfig, true). Then edit Find() (skillsdir.go:232-243) to the order: findEnv -> findConfig -> findSibling -> findWalkUp, returning the first hit; on total miss return (\"\",0,ErrNotFound). Replace ErrNotFound's value (skillsdir.go:221) with EXACTLY `skilldozer is not configured; run \\`skilldozer init\\`` (backticks around the command, as the §13 grep expects). Update the ErrNotFound doc comment from 'all three §8 rules' to 'all §8 rules'.\n4. OUTPUT: The new 5-rule Find() and the exact unconfigured message. Consumed by every main.go mode that calls skillsdir.Find() (path/list/search/check/all/tag resolution all flow through it). Ship/update tests in skillsdir_test.go: findConfig hit (write a config with an existing store, assert SourceConfig + dir); missing config file -> fall through; missing `store` key -> fall through; store dir absent -> fall through; malformed config YAML -> fall through (not a hard error); env-beats-config precedence (set both SKILLDOZER_SKILLS_DIR and a config, assert SourceEnv wins); and update TestErrNotFoundMessageHasFix to assert the new substrings (`run`, `skilldozer init`) instead of the old (SKILLDOZER_SKILLS_DIR/cd/reinstall).\n5. DOCS: none — internal; the --path stderr label and the unconfigured stderr line are user-facing but already rendered by main.go generically from Source.String()/err.Error(); no doc file change rides here (README sync is Mode B, P1.M4.T2.S1)."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M2",
+          "title": "init subcommand — §8.2 first-run setup (prompt, create store, write config)",
+          "status": "Planned",
+          "description": "Depends on M1. Today `skilldozer init` is misparsed as an unknown tag. This milestone adds the init subcommand end to end: argument/dispatch/help/exclusivity plumbing in main.go, then the init flow (cwd auto-detect + TTY-gated prompt to choose the store, mkdir + seed a compiled-in template + write the config via config.Save, then the run() branch that orchestrates and prints --path + check with correct exit codes). Bare tag resolution must remain prompt-free.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M2.T1",
+              "title": "init parsing, dispatch, help text, and exclusivity plumbing",
+              "status": "Planned",
+              "description": "Teach main.go's argument layer about init: a new `init` mode in the config struct, a `case \"init\"` in parseArgs, the `--store <dir>` flag (both --store=val and --store val forms), the init row in the USAGE/help block, and an init exclusivity family in exclusivityError (init is its own mutually-exclusive mode like check). No execution logic here — that is T2.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T1.S1",
+                  "title": "Add init config fields, case \"init\", --store flag, USAGE row, exclusivity family",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": [],
+                  "prd_selectors": ["h2.5", "h3.1", "h3.2", "h3.3", "h3.4", "h3.9", "h2.12"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/code_prd_delta.md G6/G7/G9/G10. Current config struct is at main.go:122-136; parseArgs at main.go:145-261 (the `=`-form switch is main.go:159-189, the token switch with `case \"check\"` is main.go:234); USAGE/EXAMPLES/OPTIONS at main.go:54-82; exclusivityError at main.go:635-662. Mirror how `--search <q>` captures a value (main.go:224-232) for the `--store` plumbing.\n2. INPUT: None (pure argument-parsing layer). init is currently captured as a tag by the default branch (main.go:244-258) and fails as unknown — that path must stop capturing `init` as a tag.\n3. LOGIC: (a) config struct: add `init bool` and `initStore string` fields. (b) parseArgs token switch: add `case \"init\":` that sets c.init=true AND, if a following positional token exists, captures it into c.initStore (the `init <dir>` positional form) — but do NOT consume it as a tag; subsequent non-flag tokens after an explicit dir are an error (exit 2). (c) `--store` flag: handle both `--store=<dir>` in the `=`-form switch (main.go:159-189, mirror --search) and `--store <dir>` long-form (consume next token, mirror the -s/--search next-token capture at main.go:222-232) — sets c.init=true and c.initStore=<dir>. `--store` is only valid in init context; if seen without init it is an unknown/incompatible flag (exit 2) — decide via exclusivityError. (d) USAGE text (main.go:50-98 const usageText): add `skilldozer init [<dir>]` to USAGE, add `skilldozer init --store <dir>` to EXAMPLES, and add an OPTIONS line: `init [<dir>]      First-run setup: pick/create the skills store and write the config` plus `--store <dir>    Non-interactive store path for init`. (e) exclusivityError: add an init family — c.init combined with any of {c.list, c.searchMode, c.check, c.all, c.path} OR with explicit tags (a stray tag after init that is not the store dir) => bad, msg naming the conflict, exit 2 (PRD §6.3: init is its own exclusive mode like check).\n4. OUTPUT: c.init and c.initStore populated correctly; `skilldozer init`, `skilldozer init <dir>`, `skilldozer init --store <dir>`, and `skilldozer --store <dir>` all parse without being treated as tags; USAGE shows init. Consumed by P1.M2.T2.S3 (run() reads c.init/c.initStore). Ship main_test.go cases: parse `init` sets c.init and no tags; `init /tmp/x` sets initStore=\"/tmp/x\"; `init --store /tmp/x` and `init --store=/tmp/x` set initStore; `init --list` -> exit 2; `init --path` -> exit 2.\n5. DOCS: [Mode A] The USAGE/help block (in-code, main.go usageText) IS the user-facing help surface for init — update it in THIS subtask as specified above (it rides with the parsing work). Do NOT touch README here (README is Mode B, P1.M4.T2.S1)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M2.T2",
+              "title": "init flow implementation — choose store, create store, write config, orchestrate",
+              "status": "Planned",
+              "description": "The executable init behavior (PRD §8.2). Three subtasks with a strict handoff chain: S1 chooses the store dir (cwd auto-detect via HasSkillMD + TTY-gated prompt, else c.initStore or the default), S2 creates the store (mkdir -p, seed a compiled-in example template into an empty store, never clobber) and writes config.yaml via config.Save, S3 wires the run() branch that calls S1+S2, then prints skilldozer --path and skilldozer check output, sets exit codes, and guarantees the bare-tag path never prompts.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T2.S1",
+                  "title": "Choose the store dir — cwd auto-detect + TTY-gated prompt + non-interactive overrides",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T1.S2", "P1.M1.T2.S1", "P1.M2.T1.S1"],
+                  "prd_selectors": ["h3.9", "h3.10", "h3.4"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/external_deps.md §3/§4 — reuse the repo's existing ModeCharDevice TTY technique (main.go:96-112 does it for stdout; apply the SAME check to os.Stdin, a different stream). Do NOT add golang.org/x/term (yaml.v3 must remain the only non-stdlib dep). Read prompts with one shared bufio.NewReader(os.Stdin).ReadString('\\n'); empty line or EOF => accept default. See architecture/code_prd_delta.md G11/G13.\n2. INPUT: c.initStore (string, may be empty) from P1.M2.T1.S1; config.DefaultStore() from P1.M1.T1.S2; skillsdir.HasSkillMD(dir) from P1.M1.T2.S1; os.Getwd(); os.Stdin (for the TTY check + prompt read).\n3. LOGIC: Implement a testable core, e.g. `chooseStore(haveStore string, cwd string, isTTY bool, defaultStore string, prompt func(label, def string)(string,error)) (store string, err error)` so the logic is unit-testable without a real terminal. Resolution order inside init: (1) if c.initStore != \"\" (from `init <dir>` or `--store <dir>`) use it directly — NON-interactive, no prompt; (2) else auto-detect: cwdHasSkills := skillsdir.HasSkillMD(cwd); if true, default=cwd (PRD §8.2 'detected skills in <cwd>'); else default=config.DefaultStore(); (3) if isTTY (stdin is a char device) prompt 'Where should skilldozer keep your skills? [<default>]'; Enter/EOF => default, typed path => override; (4) if NOT a TTY and no explicit c.initStore, use the auto-detected default with NO prompt (scripts/CI). Return the chosen store (absolutize via filepath.Abs). Factoring: keep os.Stdin/os.Stdout access in a thin wrapper in main.go, pass the prompt fn + isTTY in for tests.\n4. OUTPUT: A function returning the absolute chosen store dir (and nil error, or a wrapped error on a genuine prompt read failure). Consumed by P1.M2.T2.S2 (create+write uses it) and P1.M2.T2.S3 (run() calls it). Ship main_test.go: non-interactive `init --store /tmp/x` => /tmp/x (no prompt attempted); cwd-with-SKILL.md + non-TTY => cwd; cwd-without + non-TTY => DefaultStore(); isTTY=true with a fake prompt fn returning \"\" => default, returning \"/custom\" => /custom.\n5. DOCS: none — internal logic (the user-facing prompt wording is a runtime string, not a doc file; README covers the init UX in Mode B, P1.M4.T2.S1)."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T2.S2",
+                  "title": "Create store (mkdir + seed compiled-in template) and write config.yaml",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T1.S1", "P1.M1.T1.S2", "P1.M2.T1.S1", "P1.M2.T2.S1"],
+                  "prd_selectors": ["h2.10", "h3.8", "h3.9", "h2.17"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/code_prd_delta.md G11 and PRD §8.2 step 3 / §17 guardrail. The seed template MUST be a compiled-in STRING CONSTANT (var/const in main.go or internal/config), NOT go:embed ('nothing about the user's collection is compiled in'). Use the PRD §11 example SKILL.md content verbatim (with `skilldozer`, NOT `skpp` — see P1.M3.T1.S1 for the canonical text).\n2. INPUT: The chosen absolute store dir from P1.M2.T2.S1; config.Path() and config.Save() from P1.M1.T1.\n3. LOGIC: Implement a testable core `setupStore(store string, configPath string) (seeded bool, err error)`: (a) os.MkdirAll(store, 0o755) — create if missing (PRD §8.2 step 2). (b) If the store dir is empty (no entries besides maybe nothing), write example/SKILL.md under it from the compiled-in template string constant (os.MkdirAll(filepath.Join(store,\"example\"),0o755) + os.WriteFile of the template); seeded=true. (c) If the store already contains anything, adopt it in place — NEVER clobber or delete existing files (PRD §8.2/§17); seeded=false. (d) Write the config: config.Save(configPath, config.File{Store: store}) (PRD §8.2 step 4) — store is already absolute. Return (seeded, nil) or a wrapped error on fs failure.\n4. OUTPUT: store dir exists; config.yaml written with `store: <abs>`; an empty store is seeded with example/SKILL.md; a non-empty store is left untouched. Consumed by P1.M2.T2.S3 (run() calls it then reports). Ship main_test.go: setupStore on a temp empty dir creates example/SKILL.md and writes config with store=<abs>; setupStore on a dir containing a file leaves it intact (seeded=false) and still writes config; setupStore is idempotent on re-run.\n5. DOCS: none — internal. The seed template string is not user-facing documentation (it is the example skill body, synced separately in P1.M3.T1.S1)."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T2.S3",
+                  "title": "run() init dispatch — orchestrate, print --path + check, exit codes, never-prompt guarantee",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T1.S1", "P1.M2.T2.S1", "P1.M2.T2.S2"],
+                  "prd_selectors": ["h2.5", "h3.1", "h3.4", "h3.9", "h2.8", "h2.12"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/code_prd_delta.md G8. run() dispatch is at main.go:367-617 (precedence: help -> version -> unknownFlag -> exclusivity -> path -> list -> search -> check -> all -> tags -> no-mode). Insert the init branch in the right precedence slot (after exclusivity, alongside the other single modes like check; init is exclusive so it won't collide). The §13 acceptance exercises init end to end (unconfigured hint, non-interactive init writes config, config rule wins, env beats config).\n2. INPUT: c.init/c.initStore from P1.M2.T1.S1; chooseStore from P1.M2.T2.S1; setupStore from P1.M2.T2.S2; skillsdir.Find + Source for the --path echo; discover.Index + check.Check for the check echo (reuse the existing rendering at main.go:413-426 for --path and main.go:506-545 for check).\n3. LOGIC: Add `if c.init { return runInit(c, stdout, stderr) }` in run() at the appropriate precedence slot. runInit: (1) store := chooseStore(...) ; on error -> stderr one line, return 1. (2) cfgPath, err := config.Path(); seeded, err := setupStore(store, cfgPath); on error -> stderr, return 1. (3) Print to stdout the configured store path (PRD §6.1 init row: stdout = 'the configured store path'), i.e. the absolute store. (4) Then print the SAME output `skilldozer --path` would (dir + '(found via <src>)' — src now possibly 'config file') and the `skilldozer check` report, mirroring the existing path/check rendering, so the user sees which rule won and the validation result (PRD §8.2 step 5). (5) return 0 on success. CRITICAL GUARANTEE: this branch is reached ONLY when c.init is true; the bare-tag path (the `len(c.tags) > 0` branch at main.go:564-606) must NEVER call chooseStore and NEVER read stdin — re-assert in a test that `skilldozer someTag` with no config and stdin=/dev/null prints the unconfigured hint to stderr, writes nothing to stdout, exits 1, and does not block (PRD §8.2 prompt-safety / §6.4).\n4. OUTPUT: A working `skilldozer init` (interactive + `init <dir>` + `init --store <dir>`) that creates the store, writes the config, and reports. Consumed by the §13 acceptance gate (P1.M4.T1.S1). Ship main_test.go: `init --store <tmp>` writes config + creates store + prints store path to stdout + exits 0; bare `someTag` under a clean env (no SKILLDOZER_SKILLS_DIR, no config, non-TTY stdin) -> stderr hint, empty stdout, exit 1, no hang.\n5. DOCS: [Mode A] If runInit emits any user-facing help/summary strings beyond the existing --path/check rendering, keep them consistent with USAGE (already updated in P1.M2.T1.S1). README sync is Mode B (P1.M4.T2.S1) — do not touch README here."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M3",
+          "title": "Asset & completion drift sync — example skill (§11) and shell completions (§14)",
+          "status": "Planned",
+          "description": "Depends on M2 (completions add init/--store, so the feature surface must exist). Two independent tasks: fix the residual skpp references in the one shipped example skill (also fixes an inverted --search), and add init + --store to the bash/zsh/fish completions. .gitignore, LICENSE, go.mod, and install.sh are already compliant (verified in architecture/docs_and_assets_drift.md) — no task; they are re-confirmed in the final acceptance gate.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M3.T1",
+              "title": "Fix the shipped example skill — skpp -> skilldozer (PRD §11)",
+              "status": "Planned",
+              "description": "skills/example/SKILL.md still says skpp in 7 places (description, keywords, body). This is the only non-plan file with literal skpp residue, and it functionally inverts --search (keyword skpp matches while skilldozer does not). Conform it to PRD §11 verbatim.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M3.T1.S1",
+                  "title": "Rewrite skills/example/SKILL.md to match PRD §11 (skilldozer wording + keywords)",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [],
+                  "prd_selectors": ["h2.10", "h3.1", "h2.9"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/docs_and_assets_drift.md §1 — current file skills/example/SKILL.md lines 4,5,7,13,18,19,20 say skpp. PRD §11 gives the exact canonical content. Keep frontmatter `name: example` and `category: meta` unchanged (already correct). This is also the source of truth for the compiled-in seed template used by P1.M2.T2.S2 — keep them identical.\n2. INPUT: PRD §11 (the example skill block). The discover/search/check packages consume this file's frontmatter (name/description/keywords).\n3. LOGIC: Replace the 7 skpp occurrences with skilldozer: description -> 'Reference example skill for skilldozer. Demonstrates the required frontmatter and how skilldozer resolves a tag to an absolute path. Safe to delete once you add real skills.'; `metadata.keywords: [example, demo, skilldozer]`; body line 'This skill exists only so `skilldozer` has something to resolve.'; the three try-commands using `skilldozer example`, `skilldozer -f example`, `pi --skill \"$(skilldozer example)\"`. Match PRD §11 byte-for-byte (whitespace/frontmatter style included). Do NOT change name/category/license.\n4. OUTPUT: skills/example/SKILL.md compliant with §11. Verified by: `./skilldozer check` still reports OK example; `./skilldozer --search skilldozer` now matches (and `--search skpp` no longer matches); `./skilldozer example` still resolves. (If P1.M2.T2.S2's compiled-in template was written before this fix, re-sync the constant to this exact text.)\n5. DOCS: [Mode A] This file IS the user-facing example asset and its body doubles as inline documentation — updating it in this subtask satisfies the doc-with-work rule. No separate doc subtask."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M3.T2",
+              "title": "Add init subcommand + --store flag to bash/zsh/fish completions (PRD §14)",
+              "status": "Planned",
+              "description": "All three completion files complete only `check` as a subcommand and omit --store. Add init alongside check (same first-positional, exclusive treatment) and add --store to the flag matrix, lockstep across all three files. Keep the existing tag source (skilldozer --relative --all) — it is a defensible, functionally-better deviation from the literal §14 `--all`.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M3.T2.S1",
+                  "title": "Add init + --store to completions/skilldozer.bash, _skilldozer, skilldozer.fish",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M2.T1.S1"],
+                  "prd_selectors": ["h2.13", "h3.1", "h3.2", "h3.9"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/docs_and_assets_drift.md §4. Each file carries a 'LOCKSTEP to main.go parseArgs()' comment — the flag set must match main.go exactly. Current subcommand completion: bash `(( have_pos == 0 )) && cands=\"$cands check\"`; zsh `compadd -- \"$tags[@]\" check`; fish `complete -c skilldozer -n '__fish_is_first_arg' -a 'check'`. Flag matrices list --version/-v --help/-h --path/-p --list/-l --all/-a --file/-f --relative --no-color --search/-s but NOT --store. No skpp residue in any completion file.\n2. INPUT: The init/--store surface from P1.M2.T1.S1 (init is an exclusive first-positional subcommand; --store <dir> takes a value; init has no short form).\n3. LOGIC: In ALL THREE files, add `init` as a completable subcommand next to `check` (same gating: offered only as the first positional, suppressed once a subcommand/positional is present, since init is mutually exclusive per §6.3). Add `--store` to the flag matrix as a value-taking option (complete directory paths where the shell supports it, else just offer the flag). bash: add 'init' to the cands string alongside 'check', add '--store' to the compgen -W list and a value-completion rule; zsh: add 'init' to the compadd alongside 'check', add '--store' to the flags array with dir-file completion; fish: add a `complete -c skilldozer -n '__fish_is_first_arg' -a 'init'` line and a `complete -c skilldozer -l store -d '...' -r` (-r for requiring an argument). Keep tag completion (skilldozer --relative --all) unchanged.\n4. OUTPUT: `skilldozer <TAB>` offers init and check in bash/zsh/fish; `skilldozer init --<TAB>` offers --store. No behavioral regression in tag completion. Manual smoke check in each shell (or a structural grep asserting init + --store present and check still present).\n5. DOCS: [Mode A] Completion files ARE the user-facing doc/surface for tab-completion — updating them here satisfies doc-with-work. README mentions sourcing completions already; do not duplicate. No separate doc subtask."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M4",
+          "title": "Acceptance gate + changeset-level documentation sync (PRD §13, §15)",
+          "status": "Planned",
+          "description": "The final milestone. T1 runs the full PRD §13 acceptance suite (the contract gate) including the new config/init assertions, and re-confirms the already-compliant .gitignore/LICENSE/go.mod/install.sh. T2 is the Mode B changeset-level docs sweep: update README.md to surface the §8 config model, the init first-run UX, the 5-rule store priority, the SKILLDOZER_CONFIG override, and remove the obsolete §12.2 go-install caveat. T2 depends on every implementing subtask so it runs last and summarizes the whole delta.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M4.T1",
+              "title": "Run the full PRD §13 acceptance suite and confirm compliant files",
+              "status": "Planned",
+              "description": "Execute the verbatim §13 acceptance script (build, version, discovery/path, --list, tag resolution, -f, unknown-tag contract, absolute-path contract, check, the pi --no-skills --skill integration, symlink install resolve-back-to-repo, env override, the unconfigured-hint gate, non-interactive init, config-rule-wins, env-beats-config). All must pass. Also re-verify .gitignore (5 entries), LICENSE (MIT), go.mod (module + go directive + single dep), and install.sh (ldflags + symlink + verify) are still compliant.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M4.T1.S1",
+                  "title": "Execute §13 acceptance end to end and remediate any failure",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T2.S2", "P1.M2.T2.S3", "P1.M3.T1.S1", "P1.M3.T2.S1"],
+                  "prd_selectors": ["h2.12", "h2.16", "h2.1", "h3.9", "h3.10", "h2.2"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/system_context.md §2 for the verified pre-state and architecture/code_prd_delta.md §9 for what is already correct. The §13 script is in PRD.md §13 (h2.12); the config-specific gates (unconfigured hint grep, non-interactive init writes config, `--path` config-rule-wins grep, env-beats-config grep) are the new assertions this phase makes pass. pi is v0.80.3 and `pi --no-skills --skill <path>` is confirmed to load only the explicit skill (pi --help).\n2. INPUT: The built binary (go build -o skilldozer .), the full implemented feature set from M1/M2/M3.\n3. LOGIC: Run the §13 acceptance script verbatim from a clean clone state (use a temp HOME / XDG / SKILLDOZER_CONFIG for the isolation block so it does not mutate the dev environment). Each assertion must pass: build OK; --version prints; `test \"$(./skilldozer --path)\" = \"$PWD/skills\"` (sibling rule still wins from the repo); --list shows example; `./skilldozer example` resolves to a real dir; `-f example` prints SKILL.md; unknown-tag contract (empty stdout, exit 1); absolute-path contract; `check` exits 0 OK example; the pi integration line references the example skill under --no-skills; symlink install resolves back to repo; env override works; unconfigured-hint grep matches `` run `skilldozer init` ``; non-interactive `init --store` creates the store + writes config; config rule wins (`--path` shows the store); env beats config (`--path` shows SKILLDOZER_SKILLS_DIR). Separately grep-confirm: .gitignore has exactly the 5 §16 entries; LICENSE is MIT; go.mod module is github.com/dabstractor/skilldozer with the single yaml.v3 dep; install.sh uses the §12.1 ldflags + symlink + prints `skilldozer example`. If any assertion fails, fix the offending implementing subtask's code (this subtask owns the green transcript, not new features).\n4. OUTPUT: A green §13 transcript (capture stdout/stderr/rc for each step into plan/002_38acb6d28a6a/acceptance_transcript.txt) and a one-line-per-check confirmation that .gitignore/LICENSE/go.mod/install.sh are compliant. This is the Definition of Done for the phase.\n5. DOCS: none — this is verification, not authoring. If a doc file is found non-compliant during this run, route the fix to P1.M4.T2.S1 (README) or back to the relevant Mode A subtask; do not patch docs ad hoc here."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M4.T2",
+              "title": "Sync changeset-level documentation (README.md) — Mode B final sweep",
+              "status": "Planned",
+              "description": "Per the documentation-sync rule (Mode B), the cross-cutting overview docs that only make sense once the whole §8 delta is in place get a FINAL task that depends on every implementing subtask. README.md must surface: the init first-run UX (§15.3), the config file + SKILLDOZER_CONFIG (§8.1), the 5-rule store priority with the 'config file' label (§8.3/§15.7), and the removal of the obsolete §12.2 go-install caveat. The catalog-vs-settings distinction is clarified in §15.8/§17.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M4.T2.S1",
+                  "title": "Update README.md — init UX, config model, 5-rule priority, remove obsolete go-install caveat",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": ["P1.M1.T2.S2", "P1.M2.T2.S3", "P1.M3.T1.S1", "P1.M3.T2.S1", "P1.M4.T1.S1"],
+                  "prd_selectors": ["h2.14", "h3.8", "h3.9", "h3.10", "h3.12", "h2.16", "h2.12"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/docs_and_assets_drift.md §2 (items 2a-2d) and architecture/code_prd_delta.md G19/G20/G21. All 8 PRD §15 outline sections already exist as README headings; the drift is CONTENT inside §3/§7/§8. The current go-install caveat is at README.md ~lines 38-46 and 42-53; the store-priority list at ~234-249. Mirror the mcpeepants README tone (PRD §15).\n2. INPUT: The implemented feature surface (init, config.yaml, SKILLDOZER_CONFIG, the 'config file' --path label, the 5-rule order, the exact unconfigured message) from M1/M2; the §11 example wording from P1.M3.T1.S1; the green §13 transcript from P1.M4.T1.S1.\n3. LOGIC: (a) §15.3 Install: add a 'First run: `skilldozer init`' note (prompts for the store dir, writes the config); document `init <dir>` / `init --store <dir>` for non-interactive use. (b) §12.2 go install: REMOVE the obsolete caveat that tells users to `export SKILLDOZER_SKILLS_DIR`; state go install is first-class (first run = `skilldozer init`, no clone/SKILLDOZER_SKILLS_DIR needed). (c) §15.7 'How skilldozer finds the store': replace the 3-step list with the 5-rule ladder (SKILLDOZER_SKILLS_DIR -> config file store -> sibling of binary -> walk-up -> 'run `skilldozer init`'), document the config file at $XDG_CONFIG_HOME/skilldozer/config.yaml and the SKILLDOZER_CONFIG override, and list the four --path labels (SKILLDOZER_SKILLS_DIR, config file, sibling of binary, ancestor of cwd). (d) §15.8 Constraints: clarify 'no catalog index (disk-discovered); a settings config file is fine' per the §2/§17 reword. Keep all already-correct flag docs (--path/--search/--list/--all/check/-f/--relative/--no-color) intact. Match the README's existing style/voice.\n4. OUTPUT: README.md reflects the full current PRD §8/§12.2/§15. Verified by: grep README for 'skilldozer init', 'config.yaml'/'SKILLDOZER_CONFIG', 'config file', and confirm the old `export SKILLDOZER_SKILLS_DIR` caveat block is gone. This is the final deliverable of the phase.\n5. DOCS: [Mode B] This subtask IS the changeset-level documentation sync — it updates README.md (the overview doc) and depends on every implementing subtask by design. No further doc subtask."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
