@@ -19,12 +19,16 @@ func withTerminal(t *testing.T, isTTY bool) {
 	t.Cleanup(func() { isTerminal = prev })
 }
 
-// unsetSkillsEnv removes SKILLDOZER_SKILLS_DIR for the test and restores it on cleanup.
-// (Mirrors internal/skillsdir/skillsdir_test.go's unsetEnvVar helper.) Forbids
-// t.Parallel via t.Setenv.
+// unsetSkillsEnv removes SKILLDOZER_SKILLS_DIR for the test and restores it on
+// cleanup. (Mirrors internal/skillsdir/skillsdir_test.go's unsetEnvVar helper.)
+// Forbids t.Parallel via t.Setenv.
 func unsetSkillsEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("SKILLDOZER_SKILLS_DIR", "")
+	// Also neutralize the config-file rule (PRD §8.3 rule 2): point SKILLDOZER_CONFIG
+	// at a non-existent path so findConfig deterministically misses once wired into
+	// Find(). Harmless when a higher-priority rule (env/sibling/walk-up) hits first.
+	t.Setenv("SKILLDOZER_CONFIG", filepath.Join(t.TempDir(), "no-config.yaml"))
 }
 
 // writeSkillTree builds a temp skills/ tree from a map[relTag]SKILL.md-content
@@ -221,7 +225,7 @@ func TestRunPathReportsSourceLabel(t *testing.T) {
 	}
 }
 
-// --path failure: env unset + cwd in an empty temp tree -> all three §8 rules
+// --path failure: env unset + cwd in an empty temp tree -> all §8.3 rules
 // miss -> Find() returns ErrNotFound. Assert: exit 1, stdout EMPTY, stderr has
 // the one-line fix (SKILLDOZER_SKILLS_DIR / cd / reinstall). Empty stdout is the §6.4
 // contract that makes `pi --skill "$(skilldozer bad)"` fail loudly.
@@ -237,7 +241,7 @@ func TestRunPathFailureErrNotFound(t *testing.T) {
 		t.Errorf("run(--path) failure stdout=%q; want EMPTY (§6.4: print nothing on failure)", out.String())
 	}
 	msg := errOut.String()
-	for _, want := range []string{"SKILLDOZER_SKILLS_DIR", "cd", "reinstall"} {
+	for _, want := range []string{"run", "skilldozer init"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("run(--path) failure stderr=%q; missing substring %q", msg, want)
 		}
@@ -367,7 +371,7 @@ func TestRunListNoSkillsExit1(t *testing.T) {
 // exit 1, stdout empty, the one-line fix to stderr (same contract as --path).
 func TestRunListSkillsDirUnresolvableExit1(t *testing.T) {
 	unsetSkillsEnv(t)
-	t.Chdir(t.TempDir()) // force all three §8 rules to miss
+	t.Chdir(t.TempDir()) // force all §8.3 rules to miss
 	var out, errOut bytes.Buffer
 	code := run([]string{"--list"}, &out, &errOut)
 	if code != 1 {
@@ -376,7 +380,7 @@ func TestRunListSkillsDirUnresolvableExit1(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("run(--list) unresolvable stdout=%q; want empty", out.String())
 	}
-	if !strings.Contains(errOut.String(), "SKILLDOZER_SKILLS_DIR") {
+	if !strings.Contains(errOut.String(), "skilldozer init") {
 		t.Errorf("run(--list) unresolvable stderr=%q; want the one-line fix", errOut.String())
 	}
 }
@@ -581,7 +585,7 @@ func TestRunTagAmbiguousListsCandidates(t *testing.T) {
 // stderr (same contract as --path/--list).
 func TestRunTagSkillsDirUnresolvable(t *testing.T) {
 	unsetSkillsEnv(t)
-	t.Chdir(t.TempDir()) // all three §8 rules miss
+	t.Chdir(t.TempDir()) // all §8.3 rules miss
 	var out, errOut bytes.Buffer
 	code := run([]string{"example"}, &out, &errOut)
 	if code != 1 {
@@ -590,7 +594,7 @@ func TestRunTagSkillsDirUnresolvable(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("stdout=%q; want EMPTY", out.String())
 	}
-	if !strings.Contains(errOut.String(), "SKILLDOZER_SKILLS_DIR") {
+	if !strings.Contains(errOut.String(), "skilldozer init") {
 		t.Errorf("stderr=%q; want the one-line fix", errOut.String())
 	}
 }
@@ -839,7 +843,7 @@ func TestRunAllEmptyStoreExit0(t *testing.T) {
 // --all when skills dir is unresolvable -> exit 1, empty stdout, the one-line fix.
 func TestRunAllSkillsDirUnresolvable(t *testing.T) {
 	unsetSkillsEnv(t)
-	t.Chdir(t.TempDir()) // all three §8 rules miss
+	t.Chdir(t.TempDir()) // all §8.3 rules miss
 	var out, errOut bytes.Buffer
 	code := run([]string{"--all"}, &out, &errOut)
 	if code != 1 {
@@ -848,7 +852,7 @@ func TestRunAllSkillsDirUnresolvable(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("stdout=%q; want empty", out.String())
 	}
-	if !strings.Contains(errOut.String(), "SKILLDOZER_SKILLS_DIR") {
+	if !strings.Contains(errOut.String(), "skilldozer init") {
 		t.Errorf("stderr=%q; want the one-line fix", errOut.String())
 	}
 }
@@ -1079,7 +1083,7 @@ func TestRunSearchColorWhenTTY(t *testing.T) {
 // --search when skills dir is unresolvable -> exit 1, empty stdout, one-line fix.
 func TestRunSearchSkillsDirUnresolvable(t *testing.T) {
 	unsetSkillsEnv(t)
-	t.Chdir(t.TempDir()) // all three §8 rules miss
+	t.Chdir(t.TempDir()) // all §8.3 rules miss
 	var out, errOut bytes.Buffer
 	code := run([]string{"--search", "x"}, &out, &errOut)
 	if code != 1 {
@@ -1088,7 +1092,7 @@ func TestRunSearchSkillsDirUnresolvable(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("stdout=%q; want empty", out.String())
 	}
-	if !strings.Contains(errOut.String(), "SKILLDOZER_SKILLS_DIR") {
+	if !strings.Contains(errOut.String(), "skilldozer init") {
 		t.Errorf("stderr=%q; want the one-line fix", errOut.String())
 	}
 }
@@ -1257,7 +1261,7 @@ func TestRunCheckEmptyStoreExit0(t *testing.T) {
 // Skills dir unresolvable -> exit 1, EMPTY stdout, one-line fix on stderr.
 func TestRunCheckSkillsDirUnresolvable(t *testing.T) {
 	unsetSkillsEnv(t)
-	t.Chdir(t.TempDir()) // all three §8 rules miss
+	t.Chdir(t.TempDir()) // all §8.3 rules miss
 	var out, errOut bytes.Buffer
 	code := run([]string{"check"}, &out, &errOut)
 	if code != 1 {
@@ -1266,7 +1270,7 @@ func TestRunCheckSkillsDirUnresolvable(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("stdout=%q; want empty (no store -> no report)", out.String())
 	}
-	if !strings.Contains(errOut.String(), "SKILLDOZER_SKILLS_DIR") {
+	if !strings.Contains(errOut.String(), "skilldozer init") {
 		t.Errorf("stderr=%q; want the one-line fix", errOut.String())
 	}
 }

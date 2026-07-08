@@ -23,6 +23,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/dabstractor/skilldozer/internal/config"
 )
 
 // Source identifies which §8 rule located the skills directory. It is reported
@@ -85,6 +87,45 @@ func findEnv() (dir string, src Source, found bool) {
 		return "", 0, false // cwd unresolvable -> let the next rule try
 	}
 	return abs, SourceEnv, true
+}
+
+// findConfig implements PRD §8.3 rule 2 — the config file's `store` key (PRD §8.1).
+//
+// It is the primary discovery rule, set by `skilldozer init`. config.Path() gives the
+// one fixed, well-known bootstrap path ($SKILLDOZER_CONFIG or $XDG_CONFIG_HOME/skilldozer/
+// config.yaml); config.Load() reads+unmarshals it (unknown keys ignored; broken YAML is a
+// hard error). findConfig treats ANY error from either as "not yet configured -> fall
+// through" — PRD §8.1: a missing/unreadable config NEVER hard-errors.
+//
+// A relative `store` is resolved against the config file's own directory (PRD §8.1:
+// store may be relative to the config file), NOT against cwd. The resolved store must
+// name an existing directory or the rule misses.
+//
+// Returns (absStore, SourceConfig, true) on a hit; ("", 0, false) otherwise so Find()
+// can fall through to the sibling rule. Never errors (locked per-rule shape).
+func findConfig() (dir string, src Source, found bool) {
+	p, err := config.Path()
+	if err != nil {
+		return "", 0, false // no bootstrap path (e.g. relative $XDG_CONFIG_HOME) -> fall through
+	}
+	f, err := config.Load(p)
+	if err != nil {
+		return "", 0, false // missing/unreadable/malformed -> "not yet configured" -> fall through
+	}
+	if f.Store == "" {
+		return "", 0, false // no `store` key -> fall through
+	}
+	var store string
+	if filepath.IsAbs(f.Store) {
+		store = filepath.Clean(f.Store)
+	} else {
+		store = filepath.Join(filepath.Dir(p), f.Store) // relative to config file's dir (PRD §8.1)
+	}
+	info, err := os.Stat(store)
+	if err != nil || !info.IsDir() {
+		return "", 0, false // store path is not an existing dir -> fall through
+	}
+	return store, SourceConfig, true
 }
 
 // findSibling implements PRD §8 rule 2 — locate <repoDir>/skills next to the
@@ -231,7 +272,7 @@ func findWalkUp() (dir string, src Source, found bool) {
 // ErrNotFound is returned by Find when every §8.3 rule misses (unconfigured). Its
 // message is the user-facing one-line fix (PRD §8.4 / §6.4): main prints it to
 // stderr and exits 1. Print it verbatim (err.Error()); do not wrap or prefix it.
-var ErrNotFound = errors.New("could not locate the skills directory: set $SKILLDOZER_SKILLS_DIR, cd into the skilldozer repo, or reinstall skilldozer")
+var ErrNotFound = errors.New("skilldozer is not configured; run `skilldozer init`")
 
 // Find locates the skills directory per PRD §8.3 priority order (first hit wins):
 //
@@ -246,6 +287,9 @@ var ErrNotFound = errors.New("could not locate the skills directory: set $SKILLD
 // exits 1.
 func Find() (dir string, src Source, err error) {
 	if d, s, ok := findEnv(); ok {
+		return d, s, nil
+	}
+	if d, s, ok := findConfig(); ok { // PRD §8.3 priority #2
 		return d, s, nil
 	}
 	if d, s, ok := findSibling(); ok {

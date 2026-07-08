@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Skills-dir config discovery — §8.1 config-file mechanism + §8.3 5-rule priority",
-          "status": "Researching",
+          "status": "Complete",
           "description": "The foundation. Today internal/skillsdir/skillsdir.go implements only 3 discovery rules (env -> sibling -> walk-up) and an old ErrNotFound message. PRD §8.3 now requires 5 rules with a new config-file rule at priority #2. This milestone adds the internal/config package (read/write/path/default-store) as the dependency root, adds the SourceConfig enum + label, exports HasSkillMD for reuse by init, and wires findConfig into Find() at priority #2 with the exact PRD unconfigured message. No main.go / UX changes here (those land in M2).",
           "tasks": [
             {
@@ -60,7 +60,7 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Wire the config-file rule into skillsdir.Find() and adopt the 5-rule priority + new unconfigured message",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Extend internal/skillsdir/skillsdir.go from 3 rules to the PRD §8.3 5-rule ladder: env -> config file -> sibling -> walk-up -> ErrNotFound. Add the SourceConfig enum value and its 'config file' --path label, refresh the stale package/Find() doc comments, export HasSkillMD for reuse by init, implement findConfig() consuming the new config package, and replace the old ErrNotFound hint with the exact PRD string. The behavior of the existing 3 rules is unchanged (only their priority position shifts down by one).",
               "subtasks": [
                 {
@@ -81,7 +81,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T2.S2",
                   "title": "Implement findConfig() rule and wire it into Find() at priority #2; set the exact ErrNotFound message",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S1",
@@ -113,14 +113,14 @@
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "init parsing, dispatch, help text, and exclusivity plumbing",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Teach main.go's argument layer about init: a new `init` mode in the config struct, a `case \"init\"` in parseArgs, the `--store <dir>` flag (both --store=val and --store val forms), the init row in the USAGE/help block, and an init exclusivity family in exclusivityError (init is its own mutually-exclusive mode like check). No execution logic here — that is T2.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T1.S1",
                   "title": "Add init config fields, case \"init\", --store flag, USAGE row, exclusivity family",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/code_prd_delta.md G6/G7/G9/G10. Current config struct is at main.go:122-136; parseArgs at main.go:145-261 (the `=`-form switch is main.go:159-189, the token switch with `case \"check\"` is main.go:234); USAGE/EXAMPLES/OPTIONS at main.go:54-82; exclusivityError at main.go:635-662. Mirror how `--search <q>` captures a value (main.go:224-232) for the `--store` plumbing.\n2. INPUT: None (pure argument-parsing layer). init is currently captured as a tag by the default branch (main.go:244-258) and fails as unknown — that path must stop capturing `init` as a tag.\n3. LOGIC: (a) config struct: add `init bool` and `initStore string` fields. (b) parseArgs token switch: add `case \"init\":` that sets c.init=true AND, if a following positional token exists, captures it into c.initStore (the `init <dir>` positional form) — but do NOT consume it as a tag; subsequent non-flag tokens after an explicit dir are an error (exit 2). (c) `--store` flag: handle both `--store=<dir>` in the `=`-form switch (main.go:159-189, mirror --search) and `--store <dir>` long-form (consume next token, mirror the -s/--search next-token capture at main.go:222-232) — sets c.init=true and c.initStore=<dir>. `--store` is only valid in init context; if seen without init it is an unknown/incompatible flag (exit 2) — decide via exclusivityError. (d) USAGE text (main.go:50-98 const usageText): add `skilldozer init [<dir>]` to USAGE, add `skilldozer init --store <dir>` to EXAMPLES, and add an OPTIONS line: `init [<dir>]      First-run setup: pick/create the skills store and write the config` plus `--store <dir>    Non-interactive store path for init`. (e) exclusivityError: add an init family — c.init combined with any of {c.list, c.searchMode, c.check, c.all, c.path} OR with explicit tags (a stray tag after init that is not the store dir) => bad, msg naming the conflict, exit 2 (PRD §6.3: init is its own exclusive mode like check).\n4. OUTPUT: c.init and c.initStore populated correctly; `skilldozer init`, `skilldozer init <dir>`, `skilldozer init --store <dir>`, and `skilldozer --store <dir>` all parse without being treated as tags; USAGE shows init. Consumed by P1.M2.T2.S3 (run() reads c.init/c.initStore). Ship main_test.go cases: parse `init` sets c.init and no tags; `init /tmp/x` sets initStore=\"/tmp/x\"; `init --store /tmp/x` and `init --store=/tmp/x` set initStore; `init --list` -> exit 2; `init --path` -> exit 2.\n5. DOCS: [Mode A] The USAGE/help block (in-code, main.go usageText) IS the user-facing help surface for init — update it in THIS subtask as specified above (it rides with the parsing work). Do NOT touch README here (README is Mode B, P1.M4.T2.S1).",

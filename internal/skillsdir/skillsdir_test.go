@@ -24,6 +24,24 @@ func unsetEnvVar(tb testing.TB) {
 			_ = os.Unsetenv(envVar)
 		}
 	})
+	// Also neutralize the config-file rule (PRD §8.3 rule 2): point SKILLDOZER_CONFIG
+	// at a non-existent path so findConfig deterministically misses once it is wired
+	// into Find(). Without this, a machine with a real config (~/.config/skilldozer/
+	// config.yaml, or SKILLDOZER_CONFIG set) would make the all-miss tests return a real
+	// dir instead of ErrNotFound. Harmless when a higher-priority rule (env/sibling/
+	// walk-up) hits first.
+	cfgGhost := filepath.Join(tb.TempDir(), "no-config.yaml")
+	prevCfg, hadCfg := os.LookupEnv("SKILLDOZER_CONFIG")
+	if err := os.Setenv("SKILLDOZER_CONFIG", cfgGhost); err != nil {
+		tb.Fatalf("setenv SKILLDOZER_CONFIG: %v", err)
+	}
+	tb.Cleanup(func() {
+		if hadCfg {
+			_ = os.Setenv("SKILLDOZER_CONFIG", prevCfg)
+		} else {
+			_ = os.Unsetenv("SKILLDOZER_CONFIG")
+		}
+	})
 }
 
 func TestSourceString(t *testing.T) {
@@ -504,12 +522,130 @@ func TestFindAllMissReturnsErrNotFound(t *testing.T) {
 	}
 }
 
-// ErrNotFound message carries the user-facing one-line fix (PRD §8.4 / §6.4).
+// ErrNotFound message carries the user-facing one-line fix (PRD §8.4 / §6.4):
+// exactly 'skilldozer is not configured; run "skilldozer init"' (with literal
+// backticks around the command, verified by the Level 4 od-c gate).
 func TestErrNotFoundMessageHasFix(t *testing.T) {
 	msg := ErrNotFound.Error()
-	for _, want := range []string{"SKILLDOZER_SKILLS_DIR", "cd", "reinstall"} {
+	for _, want := range []string{"run", "skilldozer init"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("ErrNotFound message %q missing substring %q", msg, want)
 		}
+	}
+}
+
+// --- findConfig (PRD §8.3 rule 2 / §8.1) ---
+
+// writeCfg writes content to a temp config.yaml, sets SKILLDOZER_CONFIG to it, and
+// returns (cfgPath, cfgDir). Helper for the findConfig tests. Mirrors the writeConfig
+// idiom from internal/config/config_test.go.
+func writeCfg(t *testing.T, content string) (cfgPath, cfgDir string) {
+	t.Helper()
+	cfgDir = t.TempDir()
+	cfgPath = filepath.Join(cfgDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", cfgPath, err)
+	}
+	t.Setenv("SKILLDOZER_CONFIG", cfgPath)
+	return cfgPath, cfgDir
+}
+
+// Rule 2 hit: an existing store dir named by an absolute `store` -> found,
+// SourceConfig, cleaned absolute dir.
+func TestFindConfigHit(t *testing.T) {
+	store := t.TempDir() // already an existing, absolute dir
+	writeCfg(t, "store: "+store+"\n")
+	got, src, found := findConfig()
+	if !found {
+		t.Fatal("findConfig existing store: found=false; want true")
+	}
+	if src != SourceConfig {
+		t.Errorf("src=%v; want SourceConfig", src)
+	}
+	if want := filepath.Clean(store); got != want {
+		t.Errorf("dir=%q; want cleaned %q", got, want)
+	}
+}
+
+// Rule 2 miss: config file does not exist -> fall through (never a hard error).
+func TestFindConfigMissingFile(t *testing.T) {
+	t.Setenv("SKILLDOZER_CONFIG", filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	if dir, src, found := findConfig(); found {
+		t.Errorf("findConfig missing file: got found=true dir=%q src=%v; want false", dir, src)
+	}
+}
+
+// Rule 2 miss: config file has no `store` key -> fall through.
+func TestFindConfigMissingStoreKey(t *testing.T) {
+	writeCfg(t, "foo: bar\n") // no `store:` key
+	if dir, src, found := findConfig(); found {
+		t.Errorf("findConfig no store key: got found=true dir=%q src=%v; want false", dir, src)
+	}
+}
+
+// Rule 2 miss: `store` names a dir that does not exist -> fall through.
+func TestFindConfigStoreDirAbsent(t *testing.T) {
+	writeCfg(t, "store: "+filepath.Join(t.TempDir(), "no-such-store")+"\n")
+	if dir, src, found := findConfig(); found {
+		t.Errorf("findConfig absent store dir: got found=true dir=%q src=%v; want false", dir, src)
+	}
+}
+
+// Rule 2 CONTRACT (GOTCHA #2): syntactically broken YAML makes config.Load return
+// a hard error, but findConfig MUST turn that into a fall-through (return false),
+// never propagate it. PRD §8.1: "a missing or unreadable config is treated as 'not
+// yet configured' and falls through to §8.3 rules 3-5 — never a hard error."
+func TestFindConfigMalformedYAML(t *testing.T) {
+	writeCfg(t, "store: [unclosed\n") // syntactically broken YAML -> Load hard-errors
+	if dir, src, found := findConfig(); found {
+		t.Errorf("findConfig malformed YAML: got found=true dir=%q src=%v; want false (fall through, not hard error)", dir, src)
+	}
+}
+
+// Rule 2 (PRD §8.1): a relative `store` is resolved against the config FILE's dir,
+// not against cwd. `store: mystore` in a config at <cfgDir>/config.yaml resolves to
+// <cfgDir>/mystore.
+func TestFindConfigRelativeStoreResolvedAgainstConfigDir(t *testing.T) {
+	cfgPath, cfgDir := writeCfg(t, "store: mystore\n")
+	store := filepath.Join(cfgDir, "mystore")
+	if err := os.Mkdir(store, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", store, err)
+	}
+	got, src, found := findConfig()
+	if !found {
+		t.Fatal("findConfig relative store: found=false; want true")
+	}
+	if src != SourceConfig {
+		t.Errorf("src=%v; want SourceConfig", src)
+	}
+	if got != store {
+		t.Errorf("dir=%q; want %q (joined to filepath.Dir(%q))", got, store, cfgPath)
+	}
+}
+
+// --- precedence (PRD §8.3: first hit wins; env is rule 1, config is rule 2) ---
+
+// Find precedence: when BOTH a valid SKILLDOZER_SKILLS_DIR (rule 1) and a valid
+// config `store` (rule 2) are set, env must win. Proves the rule ordering
+// end-to-end via the public Find() combiner.
+func TestFindEnvBeatsConfig(t *testing.T) {
+	envDir := t.TempDir()
+	cfgStore := t.TempDir() // also a valid store, but config must NOT win
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("store: "+cfgStore+"\n"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", cfgPath, err)
+	}
+	t.Setenv("SKILLDOZER_CONFIG", cfgPath)
+	t.Setenv(envVar, envDir) // SKILLDOZER_SKILLS_DIR
+	got, src, err := Find()
+	if err != nil {
+		t.Fatalf("Find() env-beats-config: err=%v; want nil", err)
+	}
+	if src != SourceEnv {
+		t.Errorf("src=%v; want SourceEnv (env beats config)", src)
+	}
+	if want := filepath.Clean(envDir); got != want {
+		t.Errorf("dir=%q; want env dir %q", got, want)
 	}
 }
