@@ -1,0 +1,15 @@
+h1.0 Bug Fix Requirements
+ h2.0 Overview
+ h2.1 Critical Issues (Must Fix)
+ h2.2 Major Issues (Should Fix)
+  h3.0 Issue 1: init writes the check validation report to stdout, violating PRD §6.1's stdout contract
+  h3.1 Issue 2: init --store (and --store) with no value silently overwrites the config instead of erroring
+ h2.3 Minor Issues (Nice to Fix)
+  h3.2 Issue 3: tag combined with --path is not rejected (silent tag drop), unlike every other mode
+  h3.3 Issue 4: init init runs init instead of erroring (inconsistent with init check)
+  h3.4 Issue 5: Tilde (~) is not expanded in init's interactive prompt input
+  h3.5 Issue 6: .gitignore contains entries beyond the PRD §16 spec set
+  h3.6 Issue 7: A skill whose canonical tag is literally check or init cannot be resolved by that tag
+ h2.4 Testing Summary
+---
+code:6 para:18 list:1
