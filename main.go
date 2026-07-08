@@ -413,7 +413,7 @@ func expandShortBundle(c *config, a string, args []string, i int) (consumeNext, 
 //
 // Precedence (PRD §6.3 "--help / --version take precedence over everything else"
 //   - the conventional help-wins tiebreak):
-//     help → version → unknownFlag → exclusivity → dispatch → no-args-usage.
+//     help → version → unknownFlag → storeMissingValue (--store requires a value) → exclusivity → dispatch → no-args-usage.
 func run(args []string, stdout, stderr io.Writer) int {
 	c := parseArgs(args)
 
@@ -436,6 +436,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 	//    garbage path). Reported AFTER --help/--version so those still win.
 	if c.unknownFlag != "" {
 		fmt.Fprintf(stderr, "skilldozer: unknown flag '%s'\n", c.unknownFlag)
+		return 2
+	}
+
+	// 3.5) --store presented without its value → exit 2 (PRD §6 header "Unknown flags
+	//      ⇒ error + exit 2"; delta-PRD §2 #3 "init is non-destructive"). A value-taking
+	//      flag with no value is a parse error, NOT a silent fall-through to destructive
+	//      auto-detect init. Rejecting here — BEFORE the init dispatch — means runInit /
+	//      setupStore / configpkg.Save is NEVER called, so a pre-existing config.yaml's
+	//      `store:` value is preserved (Issue 2). stdout stays EMPTY (§6.4 discipline).
+	//      The signal is set by parseArgs in BOTH --store no-value branches (P1.M1.T2.S1);
+	//      it is NOT set by bare `init` (c.initStore=="" legitimately means "prompt").
+	if c.storeMissingValue {
+		fmt.Fprintln(stderr, "skilldozer: --store requires a value")
 		return 2
 	}
 

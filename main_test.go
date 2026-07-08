@@ -308,6 +308,109 @@ func TestRunDefaultUnknownFlag(t *testing.T) {
 	}
 }
 
+// --- run: init --store with no value → exit 2 (P1.M1.T2.S2, Issue 2 run-level) ---
+//
+// The destructive bug: `init --store` (trailing, no value) previously degraded to
+// auto-detect init that overwrote a pre-existing config. The run() guard (step 3.5)
+// rejects a missing --store value with exit 2 BEFORE the init dispatch, so the config
+// is never touched. These are run()-level tests (T2.S1 owns the parse-level signal tests).
+
+// Issue 2 (P1.M1.T2.S2): `init --store` (trailing, no value) → exit 2, empty stdout,
+// exact stderr. Previously silently fell through to destructive auto-detect init.
+func TestRunInitStoreNoValueExits2(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"init", "--store"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(init --store): code=%d; want 2 (missing --store value, PRD §6)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY (§6.4: nothing on stdout on exit-2)", out.String())
+	}
+	want := "skilldozer: --store requires a value\n"
+	if got := errOut.String(); got != want {
+		t.Errorf("stderr=%q; want %q", got, want)
+	}
+}
+
+// Issue 2: `--store=` (empty '='-form value) → exit 2 + empty stdout + exact stderr.
+func TestRunStoreEqualsEmptyExits2(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store="}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(--store=): code=%d; want 2", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY", out.String())
+	}
+	if got, want := errOut.String(), "skilldozer: --store requires a value\n"; got != want {
+		t.Errorf("stderr=%q; want %q", got, want)
+	}
+}
+
+// Issue 2: bare `--store` (no init token, no value) → exit 2. Was exit-1-usage before
+// the fix; the guard makes it a precise "requires a value" error (the bug writeup's
+// Suggested Fix: missing-value flags are hard errors, exit 2).
+func TestRunStoreBareNoValueExits2(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(--store): code=%d; want 2 (bare --store, no value)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY", out.String())
+	}
+	if got, want := errOut.String(), "skilldozer: --store requires a value\n"; got != want {
+		t.Errorf("stderr=%q; want %q", got, want)
+	}
+}
+
+// Issue 2 (P1.M1.T2.S2): the non-destructive contract. A pre-existing config.yaml
+// with a valid `store:` must survive `init --store` (no value) byte-for-byte — the
+// guard returns before runInit/setupStore/configpkg.Save. Mirrors
+// TestRunInitStoreWritesConfigCreatesStorePrintsPathExit0's setup, INVERTED:
+// pre-write the config, run the no-value form, assert it is UNCHANGED.
+func TestRunInitStoreNoValueDoesNotWriteConfig(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+	originalStore := "/tmp/B/realstore" // the value that must NOT be clobbered
+	if err := os.WriteFile(cfg, []byte("store: "+originalStore+"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	before, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatalf("read config before: %v", err)
+	}
+
+	t.Setenv("SKILLDOZER_CONFIG", cfg)    // point config.Path at our pre-written fixture
+	t.Setenv("SKILLDOZER_SKILLS_DIR", "") // env unset so the config rule is the relevant one
+	t.Chdir(t.TempDir())                  // escape the repo's walk-up rule (deterministic)
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"init", "--store"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(init --store): code=%d; want 2 (missing value, config must NOT be written)", code)
+	}
+	// §6.4: stdout stays empty.
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY", out.String())
+	}
+	// THE LOAD-BEARING ASSERTION: the config file is byte-for-byte unchanged.
+	after, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatalf("read config after: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("config was modified by a missing-value --store (must be non-destructive):\nbefore=%q\nafter =%q", before, after)
+	}
+	// Semantic re-check via the config loader (Store value preserved):
+	f, err := configpkg.Load(cfg)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if f.Store != originalStore {
+		t.Errorf("config.Store=%q; want %q (must NOT be overwritten)", f.Store, originalStore)
+	}
+}
+
 // --- run: --list / -l (P1.M2.T6) ---
 
 // --list success: a store with one skill -> catalog table on stdout, exit 0, no

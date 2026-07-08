@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Major bugfixes — init stdout contract + non-destructive flag parsing",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Restore the two Major contract violations. Issue 1: init must emit ONLY the configured store path on stdout (the check report moves to stderr) so STORE=\"$(skilldozer init --store /path)\" yields a clean single line. Issue 2: init --store (and --store=) presented with no value must fail fast (exit 2) and never overwrite an existing config via the auto-detect path.",
           "tasks": [
             {
@@ -42,7 +42,7 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Reject init --store with no value instead of silently overwriting the config (Issue 2)",
-              "status": "Researching",
+              "status": "Complete",
               "description": "When --store (or --store=) appears with no value, parseArgs silently no-ops; because the earlier init token set c.init=true with c.initStore==\"\", the invocation degrades to auto-detect init, which setupStore ALWAYS follows with config.Save — clobbering an existing valid store: value. Add a missing-value signal in parseArgs (both --store branches) and reject it in run() with exit 2 before init dispatches, without writing the config.",
               "subtasks": [
                 {
@@ -64,7 +64,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T2.S2",
                   "title": "Guard run() to reject missing --store value with exit 2 before init dispatch (config NOT written)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1"
@@ -92,14 +92,14 @@
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "Reject tag combined with --path (Issue 3)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "exclusivityError omits c.path from the tags-conflict predicate even though --path IS in the listing-modes count set and the check+mode set, so `skilldozer NONEXISTENTTAG --path` silently runs --path and drops the tag. Add c.path to the predicate and update the user-facing message.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T1.S1",
                   "title": "Add c.path to the tags-conflict predicate in exclusivityError + test",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/bug_fixes_validation.md §ISSUE 3. exclusivityError is main.go:686. The buggy predicate is main.go:702: `if hasTags && (c.list || c.searchMode || c.all) { return true, \"skilldozer: tags cannot be combined with --list/--search/--all\" }`. The asymmetry: c.path is in the count set main.go:695 `{c.path, c.list, c.searchMode, c.all}` and the check+mode set main.go:708, but NOT in the tags predicate at 702. Sibling tests: TestRunExclusivityTagsAndList (main_test.go:1559), TestRunExclusivityCheckAndPath (main_test.go:1628) proves check+--path IS rejected.\n2. INPUT: config c (has c.path bool, c.tags []string) from parseArgs.\n3. LOGIC: Implement PRD §6.3 'Mixing <tag> with --list/--search/--all is an error (exit 2)' consistently for --path. Change main.go:702 to `if hasTags && (c.path || c.list || c.searchMode || c.all) { return true, \"skilldozer: tags cannot be combined with --path/--list/--search/--all\" }`. This is a one-line predicate change + message-string update. No exit-code or ordering change (still exit 2, still checked at the same point). No external services to mock.\n4. OUTPUT: `skilldozer <tag> --path` (and `--path <tag>`) exit 2 with an empty stdout and the updated stderr message. Consumed by: the acceptance suite and the README error-contract section.\n5. DOCS: [Mode A] Update the exclusivityError doc comment at main.go:686 to note --path is now part of the tags conflict. README error-contract (README.md ~line 168-170, which lists the mutually-exclusive modes) is swept by the final Mode B task (P1.M3.T1) to mention tags+--path.",
