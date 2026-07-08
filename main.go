@@ -978,7 +978,8 @@ func setupStore(store, configPath string) (seeded bool, err error) {
 // three already-landed helpers — resolveStore (P1.M2.T2.S1: choose+absolutize the store),
 // configpkg.Path (the config-file location), setupStore (P1.M2.T2.S2: mkdir+seed+writeconfig)
 // — and then reports: the configured store path to stdout (PRD §6.1), the `--path` "found
-// via" annotation to stderr, and the `check` report to stdout (PRD §8.2 step 5). Exit 0
+// via" annotation to stderr, and the `check` report to stderr (PRD §6.1 stdout contract;
+// §6.1 is authoritative over §8.2 step 5's 'print check' wording). Exit 0
 // once create+config succeed; the check report is best-effort (NOT a gate — check findings
 // do not change init's exit code, only setup failure does).
 //
@@ -1028,9 +1029,11 @@ func runInit(c config, stdout, stderr io.Writer) int {
 		// Mirror `skilldozer --path`: which rule won.
 		fmt.Fprintf(stderr, "(found via %s)\n", src)
 	}
-	// (6) `skilldozer check` report on the effective store (PRD §8.2 step 5). Mirrors the
-	//     `if c.check` branch render VERBATIM (do not refactor; mirror). Best-effort: a
-	//     discover.Index failure is non-fatal (setup succeeded).
+	// (6) `skilldozer check` report on the effective store (PRD §8.2 step 5). init renders
+	//     this report to STDERR (PRD §6.1: stdout = the store path only); the standalone
+	//     `check` subcommand keeps its report on stdout (its report IS its stdout product),
+	//     so the two blocks intentionally DIVERGE — do NOT extract a shared helper. The
+	//     report is best-effort: a discover.Index failure is non-fatal (setup succeeded).
 	skills, ierr := discover.Index(dir)
 	if ierr != nil {
 		fmt.Fprintln(stderr, ierr)
@@ -1043,13 +1046,13 @@ func runInit(c config, stdout, stderr io.Writer) int {
 			name = "(none)"
 		}
 		if len(sr.Findings) == 0 {
-			fmt.Fprintf(stdout, "%-5s %s (%s)\n", "OK", sr.Skill.RelTag, name)
+			fmt.Fprintf(stderr, "%-5s %s (%s)\n", "OK", sr.Skill.RelTag, name)
 			continue
 		}
 		for _, f := range sr.Findings {
-			fmt.Fprintf(stdout, "%-5s %s (%s): %s\n", f.Level, sr.Skill.RelTag, name, f.Message)
+			fmt.Fprintf(stderr, "%-5s %s (%s): %s\n", f.Level, sr.Skill.RelTag, name, f.Message)
 		}
 	}
-	fmt.Fprintf(stdout, "%d skills, %d errors, %d warnings\n", len(skills), rep.Errors, rep.Warnings)
+	fmt.Fprintf(stderr, "%d skills, %d errors, %d warnings\n", len(skills), rep.Errors, rep.Warnings)
 	return 0 // setup succeeded; check findings do not change init's exit code
 }

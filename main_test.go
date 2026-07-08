@@ -2352,9 +2352,22 @@ func TestRunInitStoreWritesConfigCreatesStorePrintsPathExit0(t *testing.T) {
 		t.Errorf("config.Store=%q; want %q", f.Store, store)
 	}
 
-	// §6.1: stdout contains the configured store path.
-	if !strings.Contains(out.String(), store) {
-		t.Errorf("init stdout=%q; want it to contain the store path %q", out.String(), store)
+	// §6.1: stdout carries EXACTLY one line — the configured store path. This is the
+	// Issue-1 regression guard: the previous `Contains(out, store)` passed even though
+	// the check report leaked onto stdout, which is exactly why the bug shipped. The
+	// exact-equality check below cannot pass on the buggy code (stdout had 3 lines).
+	if got := out.String(); got != store+"\n" {
+		t.Errorf("init stdout=%q; want exactly %q (§6.1: one line, the store path)", got, store+"\n")
+	}
+	// Belt-and-suspenders: no check-report markers may appear on stdout at all.
+	for _, m := range []string{"skills,", "OK", "errors", "warnings"} {
+		if strings.Contains(out.String(), m) {
+			t.Errorf("init stdout leaked check-report marker %q: %q", m, out.String())
+		}
+	}
+	// The full check report (summary at minimum) must land on stderr instead.
+	if !strings.Contains(errOut.String(), "skills,") {
+		t.Errorf("init stderr=%q; missing the check summary (report must go to stderr)", errOut.String())
 	}
 }
 
