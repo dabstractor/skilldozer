@@ -126,21 +126,22 @@ func main() {
 // (P1.M5.T11.S1) completes the matrix by adding help and unknownFlag, the final
 // two fields needed for the §6.3 precedence + the §6-header unknown-flag rule.
 type config struct {
-	version     bool     // --version / -v : print "skilldozer <version>" and exit 0
-	help        bool     // --help / -h    : print usage to STDOUT and exit 0 (§6.1, §6.3 "help wins" tiebreak)
-	path        bool     // --path / -p    : print resolved skills dir and exit 0/1
-	list        bool     // --list / -l    : print the human-readable catalog table (§6.1)
-	all         bool     // --all / -a     : print every skill's directory path, one per line (§6.1)
-	file        bool     // --file / -f    : print the SKILL.md path instead of the dir path (§6.2)
-	relative    bool     // --relative     : print paths relative to the skills dir, not absolute (§6.2)
-	noColor     bool     // --no-color     : disable ANSI color even on a TTY (§6.2)
-	searchMode  bool     // --search <q>/-s : substring search over tag/name/description/keywords/aliases/category (§10)
-	searchQ     string   // the --search query value (consumed from the token after --search/-s)
-	check       bool     // `skilldozer check` subcommand: validate every skill in the store (§9)
-	init        bool     // `skilldozer init [<dir>]` first-run setup (PRD §8.2); also set by `--store <dir>` (which implies init)
-	initStore   string   // non-interactive store path: `init <dir>` positional or `--store <dir>` / `--store=<dir>`; empty ⇒ auto-detect (P1.M2.T2.S3)
-	tags        []string // positional <tag> args (PRD §6.1 `skilldozer <tag> [<tag>...]`); resolved in run
-	unknownFlag string   // first unknown dashed token, "" if none (§6 header → exit 2)
+	version           bool     // --version / -v : print "skilldozer <version>" and exit 0
+	help              bool     // --help / -h    : print usage to STDOUT and exit 0 (§6.1, §6.3 "help wins" tiebreak)
+	path              bool     // --path / -p    : print resolved skills dir and exit 0/1
+	list              bool     // --list / -l    : print the human-readable catalog table (§6.1)
+	all               bool     // --all / -a     : print every skill's directory path, one per line (§6.1)
+	file              bool     // --file / -f    : print the SKILL.md path instead of the dir path (§6.2)
+	relative          bool     // --relative     : print paths relative to the skills dir, not absolute (§6.2)
+	noColor           bool     // --no-color     : disable ANSI color even on a TTY (§6.2)
+	searchMode        bool     // --search <q>/-s : substring search over tag/name/description/keywords/aliases/category (§10)
+	searchQ           string   // the --search query value (consumed from the token after --search/-s)
+	check             bool     // `skilldozer check` subcommand: validate every skill in the store (§9)
+	init              bool     // `skilldozer init [<dir>]` first-run setup (PRD §8.2); also set by `--store <dir>` (which implies init)
+	initStore         string   // non-interactive store path: `init <dir>` positional or `--store <dir>` / `--store=<dir>`; empty ⇒ auto-detect (P1.M2.T2.S3)
+	storeMissingValue bool     // --store / --store= seen with NO value (Issue 2); run() rejects with exit 2 before init dispatch (config NOT written) in P1.M1.T2.S2. NOT set by bare `init` (c.initStore=="" ⇒ prompt).
+	tags              []string // positional <tag> args (PRD §6.1 `skilldozer <tag> [<tag>...]`); resolved in run
+	unknownFlag       string   // first unknown dashed token, "" if none (§6 header → exit 2)
 }
 
 // parseArgs scans argv tokens and fills a config. Flags may appear in any order
@@ -192,8 +193,13 @@ func parseArgs(args []string) config {
 			case "--store":
 				// `--store=<dir>`: non-interactive store path for init (PRD §8.2). Mirrors
 				// --search's '='-form; implies init mode (c.init=true). No short form.
+				// Empty value (--store=) records storeMissingValue so run() (P1.M1.T2.S2)
+				// rejects with exit 2 before dispatch.
 				c.init = true
 				c.initStore = val
+				if val == "" {
+					c.storeMissingValue = true
+				}
 			default:
 				if c.unknownFlag == "" {
 					c.unknownFlag = a
@@ -256,14 +262,17 @@ func parseArgs(args []string) config {
 			c.check = true
 		case "--store":
 			// `--store <dir>`: non-interactive store path for init (PRD §8.2). Mirrors
-			// --search's next-token capture; implies init mode (c.init=true). No
-			// short form. If it is the LAST token (no value follows) init stays
-			// unset — mirrors --search-no-value (no exit-2 "needs argument" here;
-			// the codebase defers that repo-wide).
+			// --search's next-token capture; implies init mode (c.init=true) when a
+			// value follows. No short form. If --store is the LAST token (no value
+			// follows), record storeMissingValue so run() rejects with exit 2
+			// (P1.M1.T2.S2) instead of silently no-op'ing into destructive auto-detect
+			// init when an `init` token already set c.init (Issue 2).
 			if i+1 < len(args) {
 				c.init = true
 				c.initStore = args[i+1]
 				i++
+			} else {
+				c.storeMissingValue = true
 			}
 		case "init":
 			// `skilldozer init [<dir>]` first-run setup (PRD §8.2). `init` is a RESERVED

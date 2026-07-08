@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Major bugfixes — init stdout contract + non-destructive flag parsing",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Restore the two Major contract violations. Issue 1: init must emit ONLY the configured store path on stdout (the check report moves to stderr) so STORE=\"$(skilldozer init --store /path)\" yields a clean single line. Issue 2: init --store (and --store=) presented with no value must fail fast (exit 2) and never overwrite an existing config via the auto-detect path.",
           "tasks": [
             {
@@ -42,14 +42,14 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Reject init --store with no value instead of silently overwriting the config (Issue 2)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "When --store (or --store=) appears with no value, parseArgs silently no-ops; because the earlier init token set c.init=true with c.initStore==\"\", the invocation degrades to auto-detect init, which setupStore ALWAYS follows with config.Save — clobbering an existing valid store: value. Add a missing-value signal in parseArgs (both --store branches) and reject it in run() with exit 2 before init dispatches, without writing the config.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Record a storeMissingValue signal in parseArgs for both --store no-value branches",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/bug_fixes_validation.md §ISSUE 2 and architecture/decisions.md §D2. parseArgs is main.go:153. The next-token `case \"--store\":` is main.go:257-266; the guard `if i+1 < len(args)` at main.go:263 silently skips when --store is the LAST token. The '='-form `--store=` is main.go:192-197 (inside the --flag=value splitter) and sets c.init=true; c.initStore=\"\" for an empty value. The config struct is main.go:128-152.\n2. INPUT: parseArgs(args []string) config. No new external data.\n3. LOGIC: Add a new bool field `storeMissingValue` to the config struct (main.go:128) with a doc comment noting it signals '--store/--store= seen with no value' and that run() rejects it with exit 2. In the next-token `case \"--store\":` branch (main.go:257-266): when `i+1 >= len(args)` (no following token), set `c.storeMissingValue = true` (instead of doing nothing). In the '='-form branch (main.go:192-197): when val == \"\" after splitting, set `c.storeMissingValue = true` (you may still set c.init true there, but run() will reject before dispatch). Do NOT overload c.unknownFlag — that channel is 'first unknown dashed token'; --store is a KNOWN flag missing its value, a different error class. CRITICAL: bare `skilldozer init` with NO --store token legitimately has c.initStore==\"\" and MUST still prompt — only the explicit --store-with-no-value case sets the signal. No external services to mock.\n4. OUTPUT: config.storeMissingValue is true iff --store/--store= appeared without a value, consumed by P1.M1.T2.S2 (run() guard). Expose the field on the config struct.\n5. DOCS: [Mode A] Add the field doc comment in the config struct. No user-facing README surface change at this subtask — the exit-2-on-missing-value behavior is covered by the final Mode B README sweep (P1.M3.T1).",
@@ -64,7 +64,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T2.S2",
                   "title": "Guard run() to reject missing --store value with exit 2 before init dispatch (config NOT written)",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1"

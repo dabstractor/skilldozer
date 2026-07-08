@@ -1166,6 +1166,9 @@ func TestParseArgsInitSubcommand(t *testing.T) {
 	if c.initStore != "" {
 		t.Errorf("parseArgs(init): initStore=%q; want empty", c.initStore)
 	}
+	if c.storeMissingValue {
+		t.Errorf("parseArgs(init): storeMissingValue=true; want false (no --store token; must still prompt)")
+	}
 }
 
 // `init <dir>` captures the positional <dir> into c.initStore (NOT into tags).
@@ -1194,6 +1197,9 @@ func TestParseArgsInitStoreLongForm(t *testing.T) {
 	if len(c.tags) != 0 {
 		t.Errorf("tags=%v; want empty", c.tags)
 	}
+	if c.storeMissingValue {
+		t.Errorf("init --store /tmp/x: storeMissingValue=true; want false (value present)")
+	}
 }
 
 // `init --store=<dir>` '='-form: --store fills initStore.
@@ -1204,6 +1210,9 @@ func TestParseArgsInitStoreEqualsForm(t *testing.T) {
 	}
 	if c.initStore != "/tmp/x" {
 		t.Errorf("initStore=%q; want /tmp/x", c.initStore)
+	}
+	if c.storeMissingValue {
+		t.Errorf("init --store=/tmp/x: storeMissingValue=true; want false (value present)")
 	}
 }
 
@@ -1219,6 +1228,52 @@ func TestParseArgsStoreWithoutInitToken(t *testing.T) {
 	}
 	if len(c.tags) != 0 {
 		t.Errorf("tags=%v; want empty", c.tags)
+	}
+	if c.storeMissingValue {
+		t.Errorf("--store /tmp/x: storeMissingValue=true; want false (value present)")
+	}
+}
+
+// Issue 2 (P1.M1.T2.S1): `init --store` (last token, no value) records the signal.
+// c.init=true (init token); initStore=""; run() (S2) rejects before dispatch.
+func TestParseArgsInitStoreLongFormNoValueSetsSignal(t *testing.T) {
+	c := parseArgs([]string{"init", "--store"})
+	if !c.init {
+		t.Errorf("init --store: init=false; want true (init token set it)")
+	}
+	if c.initStore != "" {
+		t.Errorf("init --store: initStore=%q; want empty", c.initStore)
+	}
+	if !c.storeMissingValue {
+		t.Errorf("init --store: storeMissingValue=false; want true")
+	}
+}
+
+// Issue 2: `--store=` (empty '='-form value) records the signal. c.init=true
+// ('='-form sets it unconditionally).
+func TestParseArgsInitStoreEqualsFormEmptyValueSetsSignal(t *testing.T) {
+	c := parseArgs([]string{"--store="})
+	if !c.init {
+		t.Errorf("--store=: init=false; want true ('='-form implies init)")
+	}
+	if c.initStore != "" {
+		t.Errorf("--store=: initStore=%q; want empty", c.initStore)
+	}
+	if !c.storeMissingValue {
+		t.Errorf("--store=: storeMissingValue=false; want true (empty value)")
+	}
+}
+
+// Issue 2: bare `--store` (last token, no init token) records the signal.
+// c.init=false here (no init token; next-token branch sets c.init only when a
+// value follows). run()'s guard (S2) exits 2 regardless of c.init.
+func TestParseArgsStoreNoValueNoInitTokenSetsSignal(t *testing.T) {
+	c := parseArgs([]string{"--store"})
+	if c.init {
+		t.Errorf("--store (bare): init=true; want false (no init token, no value)")
+	}
+	if !c.storeMissingValue {
+		t.Errorf("--store (bare): storeMissingValue=false; want true")
 	}
 }
 
