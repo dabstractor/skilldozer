@@ -39,18 +39,9 @@ adjacent `skills/` directory with no env var.
 go install github.com/dabstractor/skilldozer@latest
 ```
 
-> **`go install` caveat.** A `go install`'d binary lands in
-> `$(go env GOPATH)/bin` with **no** adjacent `skills/` directory, so `skilldozer`
-> cannot auto-discover the store from there. Set the runtime override before
-> use:
->
-> ```bash
-> export SKILLDOZER_SKILLS_DIR=/absolute/path/to/your/cloned/skilldozer/skills
-> ```
->
-> If you hit `skilldozer example` reporting it cannot find skills, this is the fix.
-> (Prefer `./install.sh`, which symlinks the binary next to the repo so
-> discovery works with no env var.)
+`go install` lands the binary in `$(go env GOPATH)/bin`. On first use, run
+`skilldozer init` (see First run, below) — it creates the store and writes the
+config. No clone required, and no `SKILLDOZER_SKILLS_DIR` needed for normal use.
 
 **C. From source**
 
@@ -66,6 +57,25 @@ ln -sfn "$PWD/skilldozer" ~/.local/bin/skilldozer
 ```
 
 Run `./skilldozer example` from the repo, or use the symlink from anywhere.
+
+### First run
+
+Whichever install path you used, run `skilldozer init` once:
+
+```bash
+skilldozer init
+```
+
+It prompts for the directory where skilldozer should keep your skills
+(defaulting to `$XDG_DATA_HOME/skilldozer/skills`, or the current directory if
+it already looks like a skill store), creates it, seeds an `example/SKILL.md`
+template if it is empty, and writes the config pointing at it. For scripts / CI,
+skip the prompt:
+
+```bash
+skilldozer init /path/to/store      # positional
+skilldozer init --store /path/to/store
+```
 
 ## Shell completions
 
@@ -235,27 +245,44 @@ OK    example (example)
 
 `skilldozer` locates `skills/` by this priority:
 
-1. **`SKILLDOZER_SKILLS_DIR` env var**: wins if set and the directory exists. This
-   is the override `go install` users set (see Install).
-2. **Sibling of the binary**: `os.Executable()` plus `EvalSymlinks()` resolves
-   the real binary path and looks for `skills/` next to it. This is the rule a
-   `./install.sh` symlink install relies on; a copy would break it silently.
-3. **Walk up from the current directory**: useful during development
-   (`go run .` / running `./skilldozer` from a checkout).
-4. **Else: fail with a one-line fix** telling you how to set `SKILLDOZER_SKILLS_DIR`.
+1. **`SKILLDOZER_SKILLS_DIR` env var** — override; if set and an existing dir,
+   use it. Lets CI / tests / temporary redirects win without editing the config.
+2. **Config file `store`** — the primary, set by `skilldozer init`. The config
+   lives at `$XDG_CONFIG_HOME/skilldozer/config.yaml` (→
+   `~/.config/skilldozer/config.yaml`); override the file path with
+   `SKILLDOZER_CONFIG=<file>` (handy for tests / multiple profiles). Minimal
+   valid file:
 
-`skilldozer --path` reports the winning directory on stdout and the matching rule on
-stderr — one of `SKILLDOZER_SKILLS_DIR`, `sibling of binary`, or `ancestor of cwd`.
-The stderr label matters when `SKILLDOZER_SKILLS_DIR` is typo'd: a bad value is
-silently ignored and discovery falls through to the sibling / walk-up rule, so
-the `(found via …)` line is the only way to tell the env var was skipped.
+   ```yaml
+   store: /home/you/skills
+   ```
+
+   A missing or unreadable config is treated as "not yet configured" and falls
+   through to the rules below — never a hard error.
+3. **Sibling of the running binary** (symlink-aware: `os.Executable()` plus
+   `EvalSymlinks()`) — still lets a clone-and-build dev workflow work with no
+   config. This is the rule a `./install.sh` symlink install relies on; a copy
+   would break it silently.
+4. **Walk up from `cwd`** — for `go run` / dev.
+5. **None** ⇒ unconfigured: skilldozer prints
+   `skilldozer is not configured; run \`skilldozer init\`` to stderr, writes
+   nothing to stdout, and exits 1.
+
+`skilldozer --path` reports the winning directory on stdout and the matching rule
+on stderr — one of `SKILLDOZER_SKILLS_DIR`, `config file`, `sibling of binary`,
+or `ancestor of cwd`. The stderr label matters when `SKILLDOZER_SKILLS_DIR` is
+typo'd: a bad value is silently ignored and discovery falls through to a lower
+rule, so the `--path` label is the only way to tell the env var was skipped.
 
 ## Constraints
 
-`skilldozer` is deliberately a thin, manifest-free path printer.
+`skilldozer` is deliberately a thin path printer.
 
-- **Manifest-free.** No `skills.json`, no index file. Everything is resolved
-  from the directory tree on each call.
+- **No catalog index.** There is no `skills.json`, no manifest enumerating
+  skills — the catalog is always walked from disk on each call. A *settings*
+  config file (the store location, written by `skilldozer init`) is expected and
+  fine; the rule is only that catalog data already on disk is never duplicated
+  into a sidecar.
 - **Never auto-discovered by pi.** The skills store does **not** live in any
   directory pi scans. It is never:
   - `~/.pi/agent/skills`
