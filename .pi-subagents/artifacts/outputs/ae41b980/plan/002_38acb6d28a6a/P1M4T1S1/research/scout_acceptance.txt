@@ -1,0 +1,174 @@
+# §13 Acceptance — Verification Run (P1.M4.T1.S1)
+
+**Date:** 2026-07-07
+**Repo:** /home/dustin/projects/skilldozer (branch `main`, 1 commit ahead of origin)
+**Binary rebuilt:** yes (step 1 `go build -o skilldozer .` → OK, rc=0).
+**Go toolchain:** go1.26.4-X:nodwarf5 linux/amd64
+**Script:** the exact 15-step `set +e` block from the task, run verbatim. Raw output: `/tmp/sd-verify/output.txt`.
+
+## TL;DR — 15/15 PASS
+
+All §13 acceptance gates pass against a freshly rebuilt binary. No failures.
+
+| # | Gate | Result | Source owner |
+|---|------|--------|--------------|
+| 1 | `go build` | PASS | — |
+| 2 | `--version` | PASS | `main.go:216` (`--version`/`-v`) |
+| 3 | `--path` == `$PWD/skills` (sibling rule) | PASS | `internal/skillsdir/skillsdir.go` `Find`→`findSibling`; `main.go:177,223,460-490` |
+| 4 | `--list` shows `example` | PASS | `main.go:179,225,488+` + `internal/discover/index.go` |
+| 5 | `example` resolves to real dir | PASS | `internal/resolve/resolve.go` + `skillsdir.go` |
+| 6 | `-f example` prints SKILL.md path | PASS | `main.go:229` (`--file`/`-f`) |
+| 7 | unknown tag → empty stdout, rc=1 | PASS | `main.go` default tag-branch + resolve miss |
+| 8 | `example` is absolute | PASS | `skillsdir.go` returns absolute paths |
+| 9 | `check` exits 0 | PASS | `main.go:247` + `internal/check/check.go` |
+| 10 | symlink install resolves back to repo | PASS | `skillsdir.go:167` `resolveSiblingFromExe` |
+| 11 | `SKILLDOZER_SKILLS_DIR` env override | PASS | `skillsdir.go:76` `findEnv` (rule 1) |
+| 12 | unconfigured hint + exit 1 | PASS | `skillsdir.ErrNotFound` → `main.go:461` |
+| 13 | non-interactive `init --store` | PASS | `main.go:268,954-1011` |
+| 14 | config rule wins over sibling | PASS | `skillsdir.go:106` `findConfig` (rule 2) |
+| 15 | env beats config | PASS | `skillsdir.go:288` precedence: env → config → sibling → walk-up |
+
+## Per-step detail (actual observed output)
+
+### 1. build — PASS
+```
+== 1 build ==
+OK
+build_rc=0
+```
+
+### 2. version — PASS
+```
+== 2 version ==
+skilldozer dev
+```
+Owner: `main.go:216`.
+
+### 3. path sibling — PASS (rc=0)
+```
+== 3 path sibling ==
+(found via sibling of binary)
+path_rc=0
+```
+The `(found via sibling of binary)` line is on **stderr**. stdout is byte-exact:
+```
+/home/dustin/projects/skilldozer/skills
+```
+So `test "$(./skilldozer --path)" = "$PWD/skills"` holds. Owner: `skillsdir.go` `Find`/`findSibling`; label printer `main.go:474-480`.
+
+### 4. list — PASS
+```
+TAG      NAME     DESCRIPTION
+example  example  Reference example skill for skilldozer.
+                  Demonstrates the required frontmatter
+                  and how skilldozer resolves a tag to a
+                  absolute path. Safe to delete once you
+                  add real skills.
+```
+`example` skill shown.
+
+### 5. example dir — PASS (rc=0)
+`example_dir_rc=0`. Resolves to `/home/dustin/projects/skilldozer/skills/example`.
+
+### 6. file — PASS (rc=0)
+`file_rc=0`. `-f` → `/home/dustin/projects/skilldozer/skills/example/SKILL.md`.
+
+### 7. unknown-tag — PASS
+```
+== 7 unknown-tag ==
+rc=1 out=[]
+```
+`out` byte-empty (`len=0`), rc=1. Matches PRD error contract.
+
+### 8. absolute — PASS
+```
+== 8 absolute ==
+abs_OK
+```
+
+### 9. check — PASS
+```
+== 9 check ==
+OK    example (example)
+1 skills, 0 errors, 0 warnings
+check_rc=0
+```
+
+### 10. symlink — PASS (rc=0)
+```
+== 10 symlink ==
+/home/dustin/projects/skilldozer/skills/example
+symlink_rc=0
+```
+Symlinked binary resolves back to repo. Owner: `skillsdir.go:167` `resolveSiblingFromExe`.
+
+### 11. env override — PASS (rc=0)
+```
+== 11 env override ==
+/home/dustin/projects/skilldozer/skills/example
+env_rc=0
+```
+Owner: `skillsdir.go:76` `findEnv` (rule 1).
+
+### 12. unconfigured hint — PASS
+```
+== 12 unconfigured hint ==
+rc=1
+hint_OK
+```
+Isolated run (clean HOME, unset env, no config, no sibling, no walk-up) exits rc=1. `err` file:
+```
+skilldozer is not configured; run `skilldozer init`
+```
+Owner: `skillsdir.ErrNotFound` printed at `main.go:461`.
+
+### 13. non-interactive init — PASS
+```
+== 13 non-interactive init ==
+Seeded example skill at /tmp/sd-store/example/SKILL.md
+/tmp/sd-store
+(found via config file)
+OK    example (example)
+1 skills, 0 errors, 0 warnings
+init_rc=0
+store_OK
+cfg_OK
+```
+- `init_rc=0`
+- `store_OK`: `/tmp/sd-store` created with `example/SKILL.md`.
+- `cfg_OK`: `/tmp/sd-iso/cfg.yaml` = `store: /tmp/sd-store` (exact).
+Owner: `main.go:268` (`init`) + `--store` (`main.go:258`); seeding `main.go:954,1005`.
+
+### 14. config rule wins — PASS
+```
+== 14 config rule wins ==
+/tmp/sd-store
+(found via config file)
+cfgwins_OK
+```
+Config beats sibling. Owner: `skillsdir.go:106` `findConfig` (rule 2) + `Find` precedence (`skillsdir.go:288`).
+
+### 15. env beats config — PASS
+```
+== 15 env beats config ==
+envbeats_OK
+```
+With both env and config set, `--path` stderr label is `SKILLDOZER_SKILLS_DIR` (env wins). Owner: precedence in `skillsdir.go` `Find`.
+
+## Precedence proof (rules 1–4) — `internal/skillsdir/skillsdir.go`
+1. `findEnv` — `SKILLDOZER_SKILLS_DIR`, set + existing dir — rule 1 (`:76`)
+2. `findConfig` — config `store` key — rule 2 (`:106`)
+3. `findSibling` — sibling-of-binary, symlink-aware via `resolveSiblingFromExe` — rule 3 (`:142,167`)
+4. `findWalkUp`/`findWalkUpAncestor` — rule 4 (`:231,256`)
+`Find` (`:288`) tries them in order. Labels (`Source.String()`, `:47-58`): `SKILLDOZER_SKILLS_DIR`, `config file`, `sibling of binary`, `ancestor of cwd`.
+
+## Files Retrieved
+1. `PRD.md` (lines 343-415) — §13 acceptance script (source of truth for these 15 gates + the pi end-to-end line).
+2. `main.go` (lines 121-300, 455-490, 950-1011) — CLI parse + run dispatch: version/path/list/file/check/init, `--path` byte-exact stdout + stderr label, hint printing, init seeding + config write.
+3. `internal/skillsdir/skillsdir.go` (lines 1-300) — the 4-rule skills-dir precedence, symlink resolution, source labels; the most failure-prone area per PRD.
+4. `skills/example/SKILL.md` (lines 1-12) — frontmatter driving `--list` description and `check`/`-f` resolution.
+
+## Notes / caveats
+- PRD §13 also has a **pi** end-to-end line (`pi --no-skills --skill "$(./skilldozer example)" …`). It is NOT in the 15-step task script, so it was not exercised here. PRP should run it when `pi` is available; PRD §13 says it "must pass" and must show the skill loaded under `--no-skills`.
+- Working tree has only **unstaged** changes (`completions/_skilldozer`, `completions/skilldozer.bash`, `completions/skilldozer.fish`, `plan/002_38acb6d28a6a/tasks.json`, untracked `plan/002_38acb6d28a6a/P1M3T2S1/`). **Nothing staged.** This verification touched no tracked source.
+- Step-1 `go build` rewrote the working-tree `skilldozer` binary; no `git add` performed.

@@ -1,0 +1,37 @@
+{
+  "runId": "76bb9bcc",
+  "agent": "reviewer",
+  "task": "[Read from: /home/dustin/projects/skilldozer/plan.md, /home/dustin/projects/skilldozer/progress.md]\n\nYou are auditing the EXISTING Go codebase of the `skilldozer` CLI (repo at /home/dustin/projects/skilldozer) against its CURRENT PRD (/home/dustin/projects/skilldozer/PRD.md). The code was originally built for an older `skpp` PRD and partially updated; a new planning pass (plan 002) must capture every remaining GAP and DRIFT.\n\nRead PRD.md fully, then read main.go and every file under internal/ (skillsdir, discover, resolve, ui, search, check). Produce a PRECISE, EXHAUSTIVE gap report.\n\nFocus especially hard on:\n1. PRD §8 (Locating the skills directory) — the code's skillsdir.go only implements 3 rules (env -> sibling -> walk-up). PRD §8.3 now requires 5 rules: (1) SKILLDOZER_SKILLS_DIR env, (2) config file `store` key, (3) sibling of binary, (4) walk-up from cwd, (5) none => 'skilldozer is not configured; run `skilldozer init`'. Document EXACTLY what must change: new config rule, renumbering, new Source label 'config file', revised ErrNotFound message.\n2. PRD §8.1 config file: $XDG_CONFIG_HOME/skilldozer/config.yaml, SKILLDOZER_CONFIG override, `store:` key, yaml.v3, unknown keys ignored, missing/unreadable => treated as not-configured (never hard error). Document what is missing.\n3. PRD §8.2 `init` subcommand: interactive TTY flow (cwd auto-detect -> default $XDG_DATA_HOME/skilldozer/skills -> prompt), non-interactive (`init <dir>` / `init --store <dir>`), mkdir -p, seed template example/SKILL.md if empty (string constant, NOT go:embed), write config.yaml with absolute store path, print --path + check output. Bare tag resolution NEVER prompts. Document the full init design needed.\n4. PRD §6.1 CLI table — confirm `init` row is missing; confirm `--path`/`check`/modes all present and correct.\n5. Any OTHER drift: main.go flag handling vs §6.1-6.4, error/exit semantics, exclusivity rules.\n\nFor each gap: cite the exact file:line(s) of the current code and the exact PRD section. Be exhaustive. Do NOT propose a fix list — just enumerate gaps precisely with code references and PRD citations.\n\nWrite your report to the file plan/002_38acb6d28a6a/architecture/code_prd_delta.md (create the dir if needed). Return a short summary of the top gaps.\n\n---\n**Output:**\nWrite your findings to exactly this path: /home/dustin/projects/skilldozer/.pi-subagents/artifacts/outputs/76bb9bcc/plan/002_38acb6d28a6a/architecture/code_prd_delta.md\nThis path is authoritative for this run.\nIgnore any other output filename or output path mentioned elsewhere, including output destinations in the base agent prompt, system prompt, or task instructions.",
+  "exitCode": 0,
+  "usage": {
+    "input": 63442,
+    "output": 16653,
+    "cacheRead": 786560,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 23
+  },
+  "model": "zai/glm-5.2:high",
+  "attemptedModels": [
+    "zai/glm-5.2:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "zai/glm-5.2:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 63442,
+        "output": 16653,
+        "cacheRead": 786560,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 23
+      }
+    }
+  ],
+  "durationMs": 305591,
+  "toolCount": 44,
+  "transcriptPath": "/home/dustin/projects/skilldozer/.pi-subagents/artifacts/76bb9bcc_reviewer_0_transcript.jsonl",
+  "timestamp": 1783466014834
+}

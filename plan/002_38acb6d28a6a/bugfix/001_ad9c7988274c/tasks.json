@@ -181,14 +181,14 @@
               "type": "Task",
               "id": "P1.M2.T4",
               "title": "Trim .gitignore to the exact PRD §16 5-entry spec (Issue 6)",
-              "status": "Ready",
+              "status": "Complete",
               "description": "The .gitignore carries extra entries (/build, node_modules/, venv/, .env, .pi-subagents/) and section comments beyond the §16 canonical 5-entry set. Rewrite it to exactly the §16 block. This was flagged in a prior round and is still present.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T4.S1",
                   "title": "Rewrite .gitignore to the §16 canonical 5-entry set",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/bug_fixes_validation.md §ISSUE 6 and architecture/decisions.md §D5. PRD §16 (PRD.md:423-431) spec is EXACTLY these 5 entries with NO comments: `/skilldozer`, `/dist`, `*.test`, `*.out`, `.DS_Store`. The current .gitignore has 5 extra entries (/build, node_modules/, venv/, .env, .pi-subagents/) plus 5 section-comment lines. Verification: `diff <(sed -n '426,430p' PRD.md) .gitignore` must produce no output post-fix.\n2. INPUT: none (static file rewrite).\n3. LOGIC: Implement PRD §16. Overwrite .gitignore with exactly the 5 canonical lines (no comments, no trailing extras). The 5 kept entries map 1:1 to PRD.md:426-430. Removing .pi-subagents/ makes the agent-artifacts dir untracked (surfaces in git status) — intended per §D5 (do not bless extras); this is a noted residual risk, not a blocker. This is a config/repo-hygiene surface change; treat the file content itself as the test (the diff against §16 is the acceptance check). No external services to mock.\n4. OUTPUT: .gitignore byte-for-byte matches the §16 5-entry block. Consumed by: the §16 acceptance gate and git.\n5. DOCS: [Mode A] The .gitignore IS the doc/config surface; the §16 canonical block has no comments by design (per architecture/decisions.md §D5). No separate doc edit needed. README does not enumerate .gitignore contents, so no README change.",
