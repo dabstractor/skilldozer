@@ -1,0 +1,158 @@
+PRD §13 acceptance run — 2026-07-08T01:07:59Z
+Repo: /home/dustin/projects/skilldozer
+Go:   go version go1.26.4-X:nodwarf5 linux/amd64
+pi:   /home/dustin/.local/bin/pi (0.80.3)
+Transcript: /home/dustin/projects/skilldozer/plan/002_38acb6d28a6a/acceptance_transcript.txt
+
+================================================================
+GROUP A — repo-local (no isolation)
+================================================================
+
+===== 1 build =====
+OK
+[rc=0] 1 build
+
+===== 2 version =====
+skilldozer dev
+[rc=0] 2 version
+
+===== 3 path sibling =====
+(found via sibling of binary)
+path_rc=0
+[rc=0] 3 path sibling
+
+===== 4 list =====
+TAG      NAME     DESCRIPTION
+example  example  Reference example skill for skilldozer.
+                  Demonstrates the required frontmatter
+                  and how skilldozer resolves a tag to an
+                  absolute path. Safe to delete once you
+                  add real skills.
+list_example_OK
+[rc=0] 4 list
+
+===== 5 example-dir =====
+example_dir_OK
+[rc=0] 5 example-dir
+
+===== 6 file =====
+file_OK
+[rc=0] 6 file
+
+===== 7 unknown-tag =====
+unknown-tag contract OK
+[rc=0] 7 unknown-tag
+
+===== 8 absolute =====
+absolute OK
+[rc=0] 8 absolute
+
+===== 9 check =====
+OK    example (example)
+1 skills, 0 errors, 0 warnings
+check_OK
+[rc=0] 9 check
+
+===== 10 pi end-to-end (--no-skills --skill) =====
+The example skill is loaded.
+
+- **Name:** example
+- **Description:** Reference example skill for skilldozer
+- **Location:** `/home/dustin/projects/skilldozer/skills/example/SKILL.md`
+pi-line OK (example referenced)
+[rc=0] 10 pi end-to-end (--no-skills --skill)
+
+===== 11 symlink =====
+/home/dustin/projects/skilldozer/skills/example
+symlink_OK
+[rc=0] 11 symlink
+
+===== 12 env-override =====
+/home/dustin/projects/skilldozer/skills/example
+env_OK
+[rc=0] 12 env-override
+
+================================================================
+GROUP B — isolation (temp HOME / XDG / SKILLDOZER_CONFIG)
+================================================================
+
+===== 13 unconfigured-hint =====
+rc=1
+--- err ---
+skilldozer is not configured; run `skilldozer init`
+--- /err ---
+unconfigured-hint OK
+[rc=0] 13 unconfigured-hint
+
+===== 14 init --store (non-interactive) =====
+Seeded example skill at /tmp/skilldozer-store/example/SKILL.md
+/tmp/skilldozer-store
+(found via config file)
+OK    example (example)
+1 skills, 0 errors, 0 warnings
+init_rc=0
+store_OK
+cfg_OK
+[rc=0] 14 init --store (non-interactive)
+
+===== 15 config-rule-wins =====
+cfgwins_OK
+[rc=0] 15 config-rule-wins
+
+===== 16 env-beats-config =====
+envbeats_OK
+[rc=0] 16 env-beats-config
+
+================================================================
+GROUP C — compliant files (grep gates)
+================================================================
+
+===== 17 gitignore (5 patterns) =====
+gitignore OK
+[rc=0] 17 gitignore (5 patterns)
+
+===== 18 license (line 1) =====
+license OK
+[rc=0] 18 license (line 1)
+
+===== 19 gomod (module + single require) =====
+gomod OK
+[rc=0] 19 gomod (module + single require)
+
+===== 20 install.sh (ldflags + symlink + verify-cmd) =====
+install OK
+[rc=0] 20 install.sh (ldflags + symlink + verify-cmd)
+
+================================================================
+GROUP D — isolation invariant (dev env byte-identical before/after)
+================================================================
+dev-config pre-run:  absent
+dev-config post-run: absent
+isolation OK (dev config unchanged)
+
+================================================================
+SUMMARY
+================================================================
+build:        OK
+path:         OK
+list:         OK
+example-dir:  OK
+file:         OK
+unknown-tag:  OK
+absolute:     OK
+check:        OK
+symlink:      OK
+env-override: OK
+unconfigured: OK
+init:         OK
+cfgwins:      OK
+envbeats:     OK
+gitignore:    OK
+license:      OK
+gomod:        OK
+install.sh:   OK
+isolation:    OK
+
+OK markers observed/expected: 17/17
+
+RESULT: GREEN — all §13 acceptance gates + compliant-file greps pass.

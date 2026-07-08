@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Conform existing skilldozer to the current PRD §8 config model and sync residual drift",
-      "status": "Planned",
+      "status": "Researching",
       "description": "Re-planning pass. The skilldozer CLI is already ~90% built and working (binary builds; --version/--path/--list/tag resolution/check/completions/install.sh/README/LICENSE/.gitignore all exist and pass). The PRD evolved after the original skpp build: it was renamed to skilldozer and gained a major new §8 (Locating the skills directory) featuring a settings config file and an `init` subcommand. The code was only partially updated. This phase closes the full gap: (1) add the §8.1 config-file mechanism and insert it as discovery rule #2 (5-rule priority), (2) implement the §8.2 `init` subcommand, (3) sync residual skpp drift in the example skill and shell completions, and (4) sync changeset-level docs (README) and run the §13 acceptance gate. Grounded in architecture/{system_context,code_prd_delta,external_deps,docs_and_assets_drift}.md. All work assumes TDD per subtask (failing test -> impl -> pass); no separate 'write tests' subtasks.",
       "milestones": [
         {
@@ -268,21 +268,21 @@
           "type": "Milestone",
           "id": "P1.M4",
           "title": "Acceptance gate + changeset-level documentation sync (PRD §13, §15)",
-          "status": "Planned",
+          "status": "Researching",
           "description": "The final milestone. T1 runs the full PRD §13 acceptance suite (the contract gate) including the new config/init assertions, and re-confirms the already-compliant .gitignore/LICENSE/go.mod/install.sh. T2 is the Mode B changeset-level docs sweep: update README.md to surface the §8 config model, the init first-run UX, the 5-rule store priority, the SKILLDOZER_CONFIG override, and remove the obsolete §12.2 go-install caveat. T2 depends on every implementing subtask so it runs last and summarizes the whole delta.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M4.T1",
               "title": "Run the full PRD §13 acceptance suite and confirm compliant files",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Execute the verbatim §13 acceptance script (build, version, discovery/path, --list, tag resolution, -f, unknown-tag contract, absolute-path contract, check, the pi --no-skills --skill integration, symlink install resolve-back-to-repo, env override, the unconfigured-hint gate, non-interactive init, config-rule-wins, env-beats-config). All must pass. Also re-verify .gitignore (5 entries), LICENSE (MIT), go.mod (module + go directive + single dep), and install.sh (ldflags + symlink + verify) are still compliant.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T1.S1",
                   "title": "Execute §13 acceptance end to end and remediate any failure",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T2.S2",
@@ -306,14 +306,14 @@
               "type": "Task",
               "id": "P1.M4.T2",
               "title": "Sync changeset-level documentation (README.md) — Mode B final sweep",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Per the documentation-sync rule (Mode B), the cross-cutting overview docs that only make sense once the whole §8 delta is in place get a FINAL task that depends on every implementing subtask. README.md must surface: the init first-run UX (§15.3), the config file + SKILLDOZER_CONFIG (§8.1), the 5-rule store priority with the 'config file' label (§8.3/§15.7), and the removal of the obsolete §12.2 go-install caveat. The catalog-vs-settings distinction is clarified in §15.8/§17.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T2.S1",
                   "title": "Update README.md — init UX, config model, 5-rule priority, remove obsolete go-install caveat",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T2.S2",
