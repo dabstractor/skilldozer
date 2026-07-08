@@ -911,7 +911,10 @@ func expandHome(p string) string {
 // dispatch (P1.M2.T2.S3) calls. It supplies the real dependencies — os.Getwd(),
 // config.DefaultStore(), the os.Stdin TTY check (stdinIsTerminal), and a bufio
 // prompt reader over os.Stdin/os.Stderr (readPrompt) — and returns chooseStore's
-// choice ABSOLUTIZED via filepath.Abs (PRD §8.2 "absolute store path"). The ONE
+// choice with a leading "~"/"~/" expanded to $HOME (expandHome, Issue 5) and then
+// ABSOLUTIZED via filepath.Abs (PRD §8.2 "absolute store path"). filepath.Abs alone
+// does not expand "~", so expandHome runs first — otherwise `init ~/x`, `--store ~/x`,
+// `--store=~/x`, and the interactive prompt path would all store "<cwd>/~/.x". The ONE
 // shared bufio.NewReader is created here and captured by the prompt closure so a
 // future second prompt would reuse it (external_deps.md §4: a fresh reader per
 // prompt can swallow buffered bytes).
@@ -942,6 +945,12 @@ func resolveStore(haveStore string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Expand a leading "~"/"~/" to $HOME BEFORE filepath.Abs (Issue 5). filepath.Abs
+	// does not expand "~", so without this `init ~/x`, `--store ~/x`, `--store=~/x`,
+	// and the interactive typed path would all store "<cwd>/~/x" and create a directory
+	// literally named "~". expandHome is a no-op for absolute/tilde-free paths and
+	// returns the input unchanged when $HOME is unset (fail safe).
+	store = expandHome(store)
 	abs, err := filepath.Abs(store)
 	if err != nil {
 		return "", fmt.Errorf("skilldozer init: absolutize store: %w", err)

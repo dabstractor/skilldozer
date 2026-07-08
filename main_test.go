@@ -2657,6 +2657,56 @@ func TestRunInitStoreWritesConfigCreatesStorePrintsPathExit0(t *testing.T) {
 	}
 }
 
+// TestRunInitStoreTildeExpandsHome — Issue 5 (P1.M2.T3.S2): `init --store ~/sub` (and
+// `init ~/sub` / `--store=~/sub` / the interactive prompt) must expand a leading "~" to
+// $HOME before filepath.Abs. Without the expandHome wiring in resolveStore, filepath.Abs
+// joins "~/sub" onto cwd → "<cwd>/~/sub" and a directory literally named "~" is created.
+// With the wiring, config.Store == $HOME/sub, that dir is created, and stdout (the
+// effective resolved store) == $HOME/sub. Mirrors TestRunInitStoreWritesConfigCreatesStorePrintsPathExit0
+// (the absolute, tilde-free sibling) — same setup (SKILLDOZER_CONFIG / SKILLDOZER_SKILLS_DIR=""
+// / t.Chdir), plus HOME set to a DISTINCT temp dir so home != cwd and the assertion
+// discriminates (fails on the un-wired code). The wiring is one source-agnostic line in
+// resolveStore, so this `--store` path transitively proves the fix for `init <dir>` and
+// the interactive prompt too (stdinIsTerminal is a non-overridable plain func; see S2 PRP).
+func TestRunInitStoreTildeExpandsHome(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates HOME / SKILLDOZER_* env.
+	home := t.TempDir()
+	t.Setenv("HOME", home) // expandHome + configpkg.DefaultStore read $HOME
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("SKILLDOZER_CONFIG", cfg)    // redirect the config write to a temp file
+	t.Setenv("SKILLDOZER_SKILLS_DIR", "") // ensure the config rule wins (env unset)
+	t.Chdir(t.TempDir())                  // cwd != home: without expandHome, store would be <cwd>/~/sub
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"init", "--store", "~/sub"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(init --store ~/sub): code=%d; want 0; stderr=%q", code, errOut.String())
+	}
+
+	want := filepath.Join(home, "sub") // $HOME/sub, NOT "~/sub" and NOT <cwd>/~/sub
+
+	// The store dir was CREATED (setupStore's MkdirAll on the EXPANDED path).
+	if info, err := os.Stat(want); err != nil || !info.IsDir() {
+		t.Errorf("expanded store %q not created: stat err=%v (did ~ get expanded?)", want, err)
+	}
+
+	// The config holds the EXPANDED absolute store (resolveStore expandHome→filepath.Abs→config.Save).
+	f, err := configpkg.Load(cfg)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if f.Store != want {
+		t.Errorf("config.Store=%q; want %q (~ NOT expanded before filepath.Abs)", f.Store, want)
+	}
+
+	// §6.1: stdout carries EXACTLY one line — the EFFECTIVE resolved store ($HOME/sub).
+	// skillsdir.Find() reads back the just-written config, so dir == want. On the buggy
+	// code stdout would be "<cwd>/~/sub\n", failing this equality.
+	if got := out.String(); got != want+"\n" {
+		t.Errorf("init stdout=%q; want exactly %q", got, want+"\n")
+	}
+}
+
 // TestRunBareTagUnconfiguredNeverPrompts — the load-bearing prompt-safety guarantee
 // (PRD §6.4/§8.2): a bare `skilldozer <tag>` with no configured store prints the
 // one-line fix hint to stderr, writes NOTHING to stdout, exits 1, and never blocks

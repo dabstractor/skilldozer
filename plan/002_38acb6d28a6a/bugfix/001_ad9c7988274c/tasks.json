@@ -85,7 +85,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Minor bugfixes — exclusivity corners, init dedup, tilde expansion, gitignore hygiene, reserved-tag docs",
-          "status": "Planned",
+          "status": "Ready",
           "description": "Fix the five Minor issues. Issue 3: tag+--path must exit 2 like tag+--list. Issue 4: init init must exit 2 like init check. Issue 5: init/interactive/--store paths must expand a leading ~ to $HOME before filepath.Abs. Issue 6: .gitignore trimmed to the exact PRD §16 5-entry set. Issue 7: document that check/init are reserved tags (no code change).",
           "tasks": [
             {
@@ -140,7 +140,7 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "Expand tilde (~) in init/interactive/--store paths (Issue 5)",
-              "status": "Ready",
+              "status": "Complete",
               "description": "resolveStore absolutizes the chosen store with filepath.Abs, which does NOT expand ~, so `~/myskills` becomes <cwd>/~/myskills and a dir literally named ~ is created. Add an expandHome helper (stdlib os.UserHomeDir) and call it in resolveStore before filepath.Abs. Affects interactive typed paths, init <dir>, and --store <dir>.",
               "subtasks": [
                 {
@@ -162,7 +162,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T3.S2",
                   "title": "Wire expandHome into resolveStore before filepath.Abs + integration test",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T3.S1"
@@ -181,14 +181,14 @@
               "type": "Task",
               "id": "P1.M2.T4",
               "title": "Trim .gitignore to the exact PRD §16 5-entry spec (Issue 6)",
-              "status": "Planned",
+              "status": "Ready",
               "description": "The .gitignore carries extra entries (/build, node_modules/, venv/, .env, .pi-subagents/) and section comments beyond the §16 canonical 5-entry set. Rewrite it to exactly the §16 block. This was flagged in a prior round and is still present.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T4.S1",
                   "title": "Rewrite .gitignore to the §16 canonical 5-entry set",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/bug_fixes_validation.md §ISSUE 6 and architecture/decisions.md §D5. PRD §16 (PRD.md:423-431) spec is EXACTLY these 5 entries with NO comments: `/skilldozer`, `/dist`, `*.test`, `*.out`, `.DS_Store`. The current .gitignore has 5 extra entries (/build, node_modules/, venv/, .env, .pi-subagents/) plus 5 section-comment lines. Verification: `diff <(sed -n '426,430p' PRD.md) .gitignore` must produce no output post-fix.\n2. INPUT: none (static file rewrite).\n3. LOGIC: Implement PRD §16. Overwrite .gitignore with exactly the 5 canonical lines (no comments, no trailing extras). The 5 kept entries map 1:1 to PRD.md:426-430. Removing .pi-subagents/ makes the agent-artifacts dir untracked (surfaces in git status) — intended per §D5 (do not bless extras); this is a noted residual risk, not a blocker. This is a config/repo-hygiene surface change; treat the file content itself as the test (the diff against §16 is the acceptance check). No external services to mock.\n4. OUTPUT: .gitignore byte-for-byte matches the §16 5-entry block. Consumed by: the §16 acceptance gate and git.\n5. DOCS: [Mode A] The .gitignore IS the doc/config surface; the §16 canonical block has no comments by design (per architecture/decisions.md §D5). No separate doc edit needed. README does not enumerate .gitignore contents, so no README change.",
@@ -205,14 +205,14 @@
               "type": "Task",
               "id": "P1.M2.T5",
               "title": "Document that check/init are reserved tags (Issue 7)",
-              "status": "Planned",
+              "status": "Ready",
               "description": "A skill whose canonical tag is literally check or init cannot be resolved by that tag because parseArgs treats check/init as reserved subcommand tokens. The code documents this as deliberate. This is a documentation-only fix: surface the reservation and the workarounds in the README skill-tag section. No code change (a code change would silently shadow the check/init subcommands — a worse UX surprise).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T5.S1",
                   "title": "Add a reserved-tag names note to the README skill-tag section",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/bug_fixes_validation.md §ISSUE 7 and architecture/decisions.md §D6. parseArgs `case \"check\"` (main.go:247) and `case \"init\"` (main.go:268) reserve those tokens BEFORE the default tag-capture branch (main.go:281); the reservation is already commented as deliberate in code. Prior-round §D7 set the 'no code change; documentation-only' precedent. The decision is recorded in architecture/decisions.md §D6. PRD.md is human-owned/READ-ONLY — do NOT edit PRD.md (the §7.2 note the PRD suggests is a human action item recorded in decisions.md, not executed here).\n2. INPUT: the README skill-tag section (README.md 'Where skills live' ~line 180+, which defines the canonical tag as the skill dir's path relative to skills/).\n3. LOGIC: Add a short 'Reserved tag names' note to the README skill-tag section stating that `check` and `init` are reserved subcommand names (§8.2, §9) and are never treated as skill tags, and listing the workarounds: a skill at skills/check/SKILL.md is still discoverable by --list/--all, by a NESTED path (e.g. writing/check), by its frontmatter name, or by an alias — but cannot be resolved via `skilldozer check` / `skilldozer init`. Frame it as the standard CLI subcommand-reservation rule. Keep it concise and consistent with the existing README voice. No code change; no PRD.md edit. No external services to mock.\n4. OUTPUT: README documents the reserved-tag rule and workarounds. Consumed by: users reading the README and by the final Mode B consistency sweep (P1.M3.T1).\n5. DOCS: [Mode A] This subtask's entire deliverable IS a doc edit (README skill-tag section). It is the per-feature doc (Mode A) for Issue 7; the final Mode B sweep (P1.M3.T1) verifies README consistency across all 7 fixes but does not duplicate this note.",
