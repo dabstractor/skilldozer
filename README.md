@@ -77,6 +77,12 @@ skilldozer init /path/to/store      # positional
 skilldozer init --store /path/to/store
 ```
 
+On success, `init` prints exactly the configured store path to stdout — one clean
+line, so `STORE="$(skilldozer init --store /path)"` works in scripts. The
+seeded/adopted status and the post-setup `check` report go to stderr. A leading
+`~` (or a bare `~`) in a typed answer or a `--store`/positional path expands to
+your home directory.
+
 ## Shell completions
 
 `skilldozer` ships dynamic completions for bash, zsh, and fish. Tag completion is
@@ -165,9 +171,11 @@ skilldozer --version
 (the error goes to stderr only). That is why
 `pi --skill "$(skilldozer badtag)"` fails loudly instead of loading nothing. When
 multiple tags are given, any unresolved tag causes nothing to be printed and
-exit 1, so `pi` never sees a partial result. The listing modes `--path`,
-`--list`, `--search`, and `--all` are mutually exclusive — combining any two
-exits 2.
+exit 1, so `pi` never sees a partial result. The `--path`, `--list`, `--search`,
+and `--all` modes are mutually exclusive — combining any two exits 2, as does
+combining a tag with any of them (a tag resolves one path; those modes inspect
+the whole store). `--store` expects a value: `init --store` with nothing after
+it exits 2 rather than guessing a store.
 
 `skilldozer --help` lists every flag.
 

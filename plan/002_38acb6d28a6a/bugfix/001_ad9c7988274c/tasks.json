@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "QA Bugfix Round — stdout discipline, flag-parse safety, exclusivity & repo hygiene",
-      "status": "Ready",
+      "status": "Complete",
       "description": "Fix the 7 issues surfaced by the end-to-end creative-QA pass against PRD §6/§8/§16. Two Major (init writes check report to stdout; init --store with no value silently overwrites the config) and five Minor (tag+--path not rejected; init init not rejected; tilde not expanded in init paths; .gitignore drifts from §16; check/init reserved tags undocumented). All fixes preserve the load-bearing §6.4 stdout-discipline and atomic-resolution contracts and stay stdlib-only besides yaml.v3. Research validated against the built binary at HEAD 414758d; findings in plan/002_38acb6d28a6a/bugfix/001_ad9c7988274c/architecture/.",
       "milestones": [
         {
@@ -231,21 +231,21 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Changeset-level documentation sync",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Mode B sweep: ensure README.md and any overview doc reflect the whole changeset coherently after all implementing subtasks land. The per-subtask Mode A doc edits handle inline comments and the directly-touched sections; this final task verifies README consistency across the stdout-contract change (Issue 1), the new --store exit-2 behavior (Issue 2), tags+--path exclusivity (Issue 3), and tilde support in init (Issue 5).",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "Sync changeset-level documentation (README + overview)",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Sweep README.md for changeset-level coherence: init output contract (stdout = store path only; check report on stderr), the --store-missing-value exit-2 rule, tags+--path mutual exclusion, and ~ expansion in init paths. Verify the reserved-tag note from P1.M2.T5.S1 reads consistently with the error-contract section. This runs LAST and depends on every implementing subtask.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "Sweep README.md init/error-contract sections for the changeset delta",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",
