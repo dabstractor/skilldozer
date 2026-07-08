@@ -77,6 +77,14 @@ skilldozer init /path/to/store      # positional
 skilldozer init --store /path/to/store
 ```
 
+`--store <dir>` implies `init`, so it works on its own as a first-class
+non-interactive form: `skilldozer --store /path/to/store` runs the full setup
+and writes the config. (Use one of the forms above in scripts when you want the
+intent to be self-evident; bare `--store` with an `init` token is the canonical
+shape.) Because `--store` implies init, it cannot be combined with tag
+arguments: `skilldozer --store /path mytag` exits 2 — it is an init, not a
+one-off store override for a single resolution.
+
 On success, `init` prints exactly the configured store path to stdout — one clean
 line, so `STORE="$(skilldozer init --store /path)"` works in scripts. The
 seeded/adopted status and the post-setup `check` report go to stderr. A leading
