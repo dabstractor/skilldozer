@@ -140,14 +140,14 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "Expand tilde (~) in init/interactive/--store paths (Issue 5)",
-              "status": "Planned",
+              "status": "Ready",
               "description": "resolveStore absolutizes the chosen store with filepath.Abs, which does NOT expand ~, so `~/myskills` becomes <cwd>/~/myskills and a dir literally named ~ is created. Add an expandHome helper (stdlib os.UserHomeDir) and call it in resolveStore before filepath.Abs. Affects interactive typed paths, init <dir>, and --store <dir>.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T3.S1",
                   "title": "Add the expandHome helper (stdlib os.UserHomeDir) + table-driven tests",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/go_tilde_expansion.md (full algorithm + edge-case table) and architecture/decisions.md §D4. There is NO stdlib tilde function (os.Expand/os.ExpandEnv handle only $VAR). Canonical pattern: os.UserHomeDir() + strings.HasPrefix(p, \"~/\") + bare \"~\" special case. os.UserHomeDir is already used in internal/config/config.go:154 (DefaultStore) — reuse for consistency. filepath.Abs does NOT expand ~, so expansion MUST run before it.\n2. INPUT: a path string p (the user-typed/init/--store value).\n3. LOGIC: Add `func expandHome(p string) string` in main.go, adjacent to resolveStore (main.go:865). Behavior: p==\"~\" → os.UserHomeDir() if no error else p unchanged; strings.HasPrefix(p, \"~/\") → filepath.Join(home, p[2:]) if no error else p unchanged; everything else (including ~user, ~foo, empty, relative, absolute) → returned UNCHANGED. On os.UserHomeDir error ($HOME unset), return p unchanged (fail safe — docs say caller may ignore the error). main.go already imports os, strings, path/filepath — no new imports. Do NOT widen the pure chooseStore signature (main.go:822 returns its choice verbatim by design). Mock: none (os.UserHomeDir is env-driven; tests set HOME via t.Setenv).\n4. OUTPUT: expandHome(p) string, a pure-ish helper (env-dependent only via HOME) consumed by P1.M2.T3.S2. Expose it as a package-level func so it is directly unit-testable.\n5. DOCS: [Mode A] Add the expandHome doc comment (per architecture/go_tilde_expansion.md snippet) covering the ~ / ~/ / ~user / no-HOME cases and the before-filepath.Abs ordering note. No README surface change at this subtask — the init tilde behavior is covered by the final Mode B sweep (P1.M3.T1).",
@@ -162,7 +162,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T3.S2",
                   "title": "Wire expandHome into resolveStore before filepath.Abs + integration test",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T3.S1"

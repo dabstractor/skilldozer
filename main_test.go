@@ -2427,6 +2427,44 @@ func TestChooseStorePropagatesPromptError(t *testing.T) {
 	}
 }
 
+// Issue 5 (P1.M2.T3.S1): expandHome expands a leading "~"/"~/" to $HOME (os.UserHomeDir)
+// and leaves "~user"/empty/relative/absolute unchanged. filepath.Abs does NOT expand "~",
+// so this runs before it (wired in P1.M2.T3.S2). ~/ cleans to home (filepath.Join strips the
+// trailing slash) — acceptable for a store dir.
+func TestExpandHome(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates HOME.
+	t.Setenv("HOME", "/home/testuser")
+	for _, tc := range []struct{ in, want string }{
+		{"~/myskills", "/home/testuser/myskills"},
+		{"~/", "/home/testuser"},
+		{"~", "/home/testuser"},
+		{"~user", "~user"},
+		{"~foo", "~foo"},
+		{"~foo/bar", "~foo/bar"},
+		{"~~/weird", "~~/weird"},
+		{"", ""},
+		{"foo/bar", "foo/bar"},
+		{"/abs/path", "/abs/path"},
+	} {
+		if got := expandHome(tc.in); got != tc.want {
+			t.Errorf("expandHome(%q) = %q; want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// Issue 5 (P1.M2.T3.S1): with $HOME unset, os.UserHomeDir errors and expandHome returns the
+// input UNCHANGED (fail safe — never "", never crashes). The error is swallowed, NOT
+// propagated (deliberately asymmetric with internal/config.DefaultStore, which propagates).
+func TestExpandHomeNoHomeUnchanged(t *testing.T) {
+	// Do NOT call t.Parallel() — mutates HOME.
+	t.Setenv("HOME", "")
+	for _, in := range []string{"~/myskills", "~", "~/"} {
+		if got := expandHome(in); got != in {
+			t.Errorf("with no HOME, expandHome(%q) = %q; want unchanged", in, got)
+		}
+	}
+}
+
 // TestSetupStoreEmptyDirSeedsExampleAndWritesConfig locks the empty-store seed path: an
 // empty store dir is created, example/SKILL.md is written with the exampleSkillTemplate
 // bytes EXACTLY (catches a botched backtick splice — GOTCHA #1), and the config is

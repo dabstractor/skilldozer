@@ -884,6 +884,29 @@ func chooseStore(haveStore, cwd string, isTTY bool, defaultStore string, prompt 
 	return choice, nil
 }
 
+// expandHome expands a leading "~" or "~/" to the current user's home directory
+// (os.UserHomeDir) so that `init ~/myskills` resolves to $HOME/myskills rather than
+// <cwd>/~/myskills. Only the CURRENT user's home is expanded ("~" and "~/..."); "~user"
+// / "~foo" are returned unchanged (other-user expansion needs cgo/os/user, out of scope).
+// filepath.Abs does NOT expand "~", so this MUST run before filepath.Abs (Issue 5).
+// If $HOME is unset, os.UserHomeDir returns an error and the path is returned unchanged
+// (fail safe — the docs say the caller may ignore the error).
+func expandHome(p string) string {
+	if p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+		return p
+	}
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[2:])
+		}
+		return p
+	}
+	return p
+}
+
 // resolveStore is the I/O-bearing wrapper around chooseStore that run()'s init
 // dispatch (P1.M2.T2.S3) calls. It supplies the real dependencies — os.Getwd(),
 // config.DefaultStore(), the os.Stdin TTY check (stdinIsTerminal), and a bufio
