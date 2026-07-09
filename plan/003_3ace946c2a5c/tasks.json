@@ -1,0 +1,136 @@
+{
+  "backlog": [
+    {
+      "type": "Phase",
+      "id": "P1",
+      "title": "`completion` subcommand + no-args implicit help",
+      "status": "Researching",
+      "description": "Implement the two PRD changes introduced by commit bbd4e74 (which touched PRD.md only): (A) bare invocation flips from stderr/exit-1 to stdout/exit-0 implicit help (§6.3, decision 17); (B) new `completion` subcommand that emits shell completion scripts to stdout for `eval` (§14.6, decision 18). The codebase is an existing, fully working Go CLI from sessions 001+002 — all tests pass. This delta closes the code/PRD gap. Do NOT redesign existing subsystems (discovery, config, resolve, check). Reference plan/003_3ace946c2a5c/architecture/ for verified line numbers and mirror patterns.",
+      "milestones": [
+        {
+          "type": "Milestone",
+          "id": "P1.M1",
+          "title": "No-args invocation → implicit help (stdout, exit 0)",
+          "status": "Planned",
+          "description": "Flip the no-mode fallthrough in run() from stderr/exit-1 to stdout/exit-0 so `skilldozer | grep …` works. Foundation for the §6.4 stream-separation guarantee that the completion subcommand also relies on (scripts to stdout ONLY, errors to stderr ONLY). Tiny, localized change.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M1.T1",
+              "title": "Flip no-args/modifiers-only to stdout+exit0",
+              "status": "Planned",
+              "description": "Change the tail of run() so 'no recognized mode' (truly no-args AND modifiers-only like `--no-color` alone) prints usage() to stdout and returns 0 (implicit --help). Update doc comments and the two tests that assert the old behavior.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S1",
+                  "title": "Flip the no-mode fallthrough + update its tests + doc comments",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [],
+                  "prd_selectors": ["h2.5", "h3.3", "h3.4", "h2.12", "h2.18"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/003_3ace946c2a5c/architecture/code_change_map.md §'Change A' for exact line numbers. See plan/003_3ace946c2a5c/architecture/test_patterns.md for the test rewrite. The no-mode fallthrough is at main.go:696-700.\n2. INPUT: The `run()` function at main.go:428 has a tail fallthrough at main.go:696-700 that currently does `fmt.Fprint(stderr, usage()); return 1`. The `usage()` function (main.go:98) returns the `usageText` constant. The `usageText` doc comment at main.go:45-51 says 'to stderr for the no-args default (exit 1)' — this is now WRONG and must be updated.\n3. LOGIC: Implement PRD §6.3 (decision 17): 'No arguments and no flag ⇒ print usage to stdout, exit 0. Bare invocation is implicit --help.' Make THREE code edits:\n   (a) main.go:699: change `fmt.Fprint(stderr, usage())` → `fmt.Fprint(stdout, usage())`\n   (b) main.go:700: change `return 1` → `return 0`\n   (c) Update the comment at main.go:695-698 from 'usage to STDERR, exit 1 (PRD §6.3: parity with get-server-config.sh)' to cite §6.3 / decision 17 (implicit --help, stdout, exit 0).\n   ALSO update these comments that reference the old behavior:\n   - main.go:51: the usageText doc comment line 'The SAME text is printed to stdout for --help (exit 0) and to stderr for the no-args default (exit 1)' → change to reflect that no-args now also goes to stdout, exit 0.\n   - main.go:418-421: the run() exit-code doc list says exit 1 includes 'no recognized mode (usage to stderr)' → remove that bullet (no-mode is now exit 0 / stdout).\n   Update TWO tests:\n   - main_test.go:280 TestRunDefaultNoArgs: change from `code != 1; out.Len() != 0; errOut contains USAGE` to `code != 0; !strings.Contains(out.String(), \"USAGE\"); errOut.Len() != 0`. The test doc string should reference §6.3 / decision 17.\n   - main_test.go:1670 TestRunModifiersOnlyNoMode: same flip — `run([]string{\"--no-color\"}, &out, &errOut)` should now yield code 0, USAGE on stdout, stderr empty.\n   KEEP all genuine-failure paths untouched: unknown flag→stderr/exit 2 (main.go:453), exclusivity→stderr/exit 2 (main.go:481), unresolved tag→stderr/exit 1 (main.go:662), unconfigured→stderr/exit 1 (main.go:518). Only the no-mode fallthrough flips.\n4. OUTPUT: `run(nil, stdout, stderr)` returns 0, writes usage to stdout, writes nothing to stderr. `run([\"--no-color\"], stdout, stderr)` same. The §13 'Grepability contract' assertions pass: `out=$(./skilldozer 2>/dev/null); rc=$?; [ \"$rc\" = \"0\" ]` and `printf '%s' \"$out\" | grep -qi 'USAGE'` and `test -z \"$(./skilldozer 2>&1 >/dev/null)\"`.\n5. DOCS: [Mode A] Update the in-code doc comments cited above (main.go:51, main.go:418-421, main.go:695-698) — these ARE the user-facing developer docs for the exit-code contract. No separate docs file touches this behavior (§15 README outline does not mention no-args behavior). This rides WITH the work."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M2",
+          "title": "`completion` subcommand: parse, dispatch, embed, detect shell",
+          "status": "Planned",
+          "description": "The bulk of the delta. Add the `completion` reserved subcommand to main.go: config fields, parseArgs token + --shell flag handling, exclusivity, run() dispatch, //go:embed of the three completion scripts, shell detection, and the usageText updates. Depends on M1's stream discipline (completion writes the script ONLY to stdout; errors ONLY to stderr).",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M2.T1",
+              "title": "Parsing, exclusivity, and USAGE for `completion`",
+              "status": "Planned",
+              "description": "Add `completion` as a reserved subcommand token in parseArgs (mirroring check/init), add `--shell` as a long-only value-taking flag (mirroring --store), add completion to exclusivityError, and add the completion/--shell rows to usageText. This task makes `completion` a recognized token but does NOT yet implement the dispatch (that's P1.M2.T2).",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T1.S1",
+                  "title": "`completion` token + `--shell` flag + config fields + USAGE row",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": [],
+                  "prd_selectors": ["h2.5", "h3.1", "h3.3", "h3.4", "h2.12", "h2.13", "h3.19", "h2.16", "h2.18"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/003_3ace946c2a5c/architecture/code_change_map.md §B1-B4, B8 for exact line numbers. See plan/003_3ace946c2a5c/architecture/external_deps.md for the embed details. The config struct is at main.go:128-151. parseArgs is at main.go:154. The =-form switch is at main.go:188-204. The main token switch is at main.go:220-312 (check at :253, init at :277, --store at :263). exclusivityError is at main.go:722-770 (init block at :752-761). usageText is at main.go:52-100.\n2. INPUT: The existing `config` struct (main.go:128-151) has fields for check/init/storeMissingValue/tags. The parseArgs function handles reserved tokens via `case \"check\":` (main.go:253, sets `c.check = true`) and `case \"init\":` (main.go:277, sets `c.init = true` + optional positional capture). Value-taking flags use both a `=`-form switch (main.go:188-204: `case \"--store\":` sets `c.init=true; c.initStore=val`) and a main switch (main.go:263: `case \"--store\":` consumes next token via `i++`). exclusivityError (main.go:722-770) has blocks for check+tags, check+mode, init+tags, init+mode.\n3. LOGIC: Implement PRD §6.1 (completion row), §6.3 (reserved subcommand), §14.6. FIVE edits:\n   (a) config struct (~main.go:142): add `completion bool` and `completionShell string` with doc comments referencing §14.6.\n   (b) parseArgs =-form switch (~main.go:193, after `case \"--store\":`): add `case \"--shell\": c.completion = true; c.completionShell = val`. This mirrors --store's pattern: --shell implies completion mode AND sets the value.\n   (c) parseArgs main token switch: add `case \"completion\": c.completion = true` (mirror `case \"check\":` at :253 — simplest reserved token). Add `case \"--shell\":` mirroring `case \"--store\":` at :263: if `i+1 < len(args)` then `c.completion = true; c.completionShell = args[i+1]; i++`. If --shell is the last token (no value), completion stays false — mirrors --search's no-value behavior (silent no-op, no storeMissingValue guard needed since §6.4 doesn't specify a missing-value exit code for --shell).\n   (d) exclusivityError (~main.go:761, after the init block): add a completion block mirroring init: `if c.completion { if hasTags { return true, \"skilldozer: 'completion' cannot be combined with tag arguments\" }; if c.check || c.init || c.list || c.searchMode || c.all || c.path { return true, \"skilldozer: 'completion' cannot be combined with check/init/--path/--list/--search/--all\" } }`. This catches: `completion example` (completion+tag), `completion --list` (completion+mode), `check completion` (check+tag since the second 'completion' hits default→tag), `completion completion` (duplicate→tag→hasTags).\n   (e) usageText (main.go:52-100): add `skilldozer completion [--shell <name>]` to the USAGE block (after the `skilldozer init [<dir>]` line). Add `eval \"$(skilldozer completion)\"` to EXAMPLES. Add two rows to OPTIONS: `completion [--shell <name>]   Emit the shell completion script for eval (§14.6)` and `--shell <bash|zsh|fish>      Force a shell for completion (else auto-detect)`. Mirror the exact column alignment of the check/init/--store rows.\n   Write parseArgs/exclusivity tests in main_test.go: `completion` sets c.completion=true and no tags; `completion --shell bash` / `--shell=bash` set completionShell; `completion example` (tag) / `completion --list` / `check completion` ⇒ exit 2.\n4. OUTPUT: parseArgs recognizes `completion` as a reserved token (not a tag) and `--shell` as a long-only value-taking flag that implies completion mode. exclusivityError rejects completion+tags and completion+other-modes with exit 2. The USAGE block lists `completion [--shell <name>]`. At this point `run()` does NOT yet dispatch completion (that is P1.M2.T2.S2), so `skilldozer completion` falls through to the no-mode path — that is expected and fine (TDD: the dispatch test is part of T2.S2).\n5. DOCS: [Mode A] The usageText const IS the user-facing help surface — updating it in this subtask satisfies doc-with-work for the `completion` CLI contract. No separate docs file."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M2.T2",
+              "title": "`//go:embed`, dispatch, and shell detection",
+              "status": "Planned",
+              "description": "Wire the completion subcommand end-to-end: embed the three completion scripts via //go:embed, add the run() dispatch slot, implement shell detection (--shell → $SKILLDOZER_SHELL → basename($SHELL) → exit 1) and the exit-code matrix (unsupported --shell value → exit 2).",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T2.S1",
+                  "title": "Embed the three completion scripts + completionScript() function",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [],
+                  "prd_selectors": ["h3.19", "h2.13", "h2.16"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/003_3ace946c2a5c/architecture/external_deps.md for verified embed details. CRITICAL: `//go:embed completions/_skilldozer` works WITHOUT `all:` prefix — confirmed by live test and Go source analysis (explicit file paths bypass the `_`/`.` exclusion which only applies to directory-walk patterns). Three `string` vars is the idiomatic pattern for 3 known static files.\n2. INPUT: The three completion files exist at `completions/skilldozer.bash` (69 lines), `completions/_skilldozer` (59 lines, zsh), `completions/skilldozer.fish` (51 lines). They are the single source of truth (PRD §14.6). main.go currently has NO `//go:embed` directives anywhere (the only embed-adjacent comment is at main.go:962, which is about the init seed template being a STRING CONSTANT not go:embed — unrelated). The `var version = \"dev\"` declaration is at main.go:43.\n3. LOGIC: Implement PRD §14.6 embedding. Add `import _ \"embed\"` to the import block (if not already imported). Add THREE package-scope var declarations with `//go:embed` directives (the directive MUST immediately precede the var, with only blank lines/comments between). Place them near `var version` at main.go:43, after imports:\n   ```go\n   //go:embed completions/skilldozer.bash\n   var bashCompletion string\n   //go:embed completions/_skilldozer\n   var zshCompletion string\n   //go:embed completions/skilldozer.fish\n   var fishCompletion string\n   ```\n   Add a `completionScript(shell string) (string, bool)` function (near the other helpers, e.g. before runInit at main.go:1057): switch on shell, return the matching embedded string + true; return \"\", false for unsupported shells. The on-disk files are the single source of truth; this embeds them verbatim (PRD §14.6: 'both read the same files').\n   Verify with `go vet ./... && go build ./...` — if the `_skilldozer` embed failed, the build would error with 'pattern completions/_skilldozer: no matching files found' (it will not, per research).\n4. OUTPUT: Three package-scope `string` vars holding the verbatim completion scripts, plus a `completionScript(shell) (string, bool)` function that maps \"bash\"→bashCompletion, \"zsh\"→zshCompletion, \"fish\"→fishCompletion. Available for consumption by P1.M2.T2.S2's `runCompletion`.\n5. DOCS: [Mode A] none beyond code — the embed is an internal implementation detail, not a user-facing/config/API surface change."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M2.T2.S2",
+                  "title": "`run()` dispatch + shell detection + exit codes",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M2.T1.S1", "P1.M2.T2.S1"],
+                  "prd_selectors": ["h3.1", "h3.4", "h3.19", "h2.12", "h2.13", "h2.18"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/003_3ace946c2a5c/architecture/code_change_map.md §B5, B7 for dispatch slot and function structure. See plan/003_3ace946c2a5c/architecture/external_deps.md §'Shell detection' for the detectShell helper design. See plan/003_3ace946c2a5c/architecture/test_patterns.md §'Completion subcommand — dispatch' for the exact test cases.\n2. INPUT: From P1.M2.T1.S1: the `config` struct has `completion bool` and `completionShell string`; parseArgs populates them; exclusivityError rejects completion+other-modes (so when c.completion is true, NO other mode is active). From P1.M2.T2.S1: `completionScript(shell string) (string, bool)` maps shell names to embedded scripts. The run() function dispatches exclusive subcommands after the exclusivity gate — the init dispatch is at main.go:482: `if c.init { return runInit(c, stdout, stderr) }`.\n3. LOGIC: Implement PRD §14.6 shell detection + exit codes. THREE additions:\n   (a) Dispatch slot in run(): insert `if c.completion { return runCompletion(c, stdout, stderr) }` AFTER the `if c.init { ... }` block (main.go:482) and BEFORE the path/list/search/check/all/tags ladder (main.go:518). This mirrors how init is dispatched as an exclusive mode.\n   (b) `detectShell(explicit, envShell, loginShell string) (string, bool)` — a testable pure function (no env mutation). Returns the first non-empty of explicit/envShell/loginShell, or (\"\", false) if all empty. Called as `detectShell(c.completionShell, os.Getenv(\"SKILLDOZER_SHELL\"), loginShellBase())` where `loginShellBase()` does: `s := os.Getenv(\"SHELL\"); if s == \"\" { return \"\" }; return strings.ToLower(filepath.Base(s))` (guards filepath.Base(\"\")→\".\").\n   (c) `runCompletion(c config, stdout, stderr io.Writer) int`:\n     1. Resolve shell via detectShell.\n     2. If shell == \"\" (undetectable): `fmt.Fprintln(stderr, \"could not detect shell; pass --shell {bash|zsh|fish}\")`; return 1. NOTHING on stdout.\n     3. Validate: call `script, ok := completionScript(shell)`. If !ok (unsupported value like tcsh): `fmt.Fprintf(stderr, \"skilldozer: unsupported shell '%s' (want bash|zsh|fish)\\n\", shell)`; return 2. NOTHING on stdout.\n     4. `fmt.Fprint(stdout, script)`; return 0.\n   Write tests in main_test.go (mirror the runInit/check test patterns): `completion --shell bash` → stdout contains `_skilldozer_completion`, exit 0; `completion --shell fish` → stdout contains `complete -c skilldozer`, exit 0; `--shell tcsh` → stderr + exit 2, empty stdout; no explicit + no env + no $SHELL → stderr mentions 'shell', exit 1, empty stdout; detectShell unit tests (explicit wins over env wins over loginShell; all empty → false). The §13 acceptance assertions must pass verbatim.\n4. OUTPUT: `skilldozer completion --shell bash` emits the bash script to stdout, exit 0. `skilldozer completion --shell fish` emits fish. `skilldozer completion --shell tcsh` → stderr + exit 2, nothing on stdout. `skilldozer completion` with no detectable shell → stderr + exit 1, nothing on stdout. `$SKILLDOZER_SHELL=zsh skilldozer completion` → zsh script. `$SHELL=/bin/zsh skilldozer completion` → zsh script (basename).\n5. DOCS: [Mode A] none beyond code — §14.6 emit semantics are runtime behavior, not a doc file."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Milestone",
+          "id": "P1.M3",
+          "title": "Completion-file lockstep + changeset-level documentation (Mode B)",
+          "status": "Planned",
+          "description": "Add `completion` as a completable first-arg subcommand to all three shell completion files (§14.4 lockstep invariant — once `completion` is a recognized token in parseArgs, the completion files must offer it). Then sync the README to document the `completion` subcommand as the easy install path (Mode B — changeset-level doc sync). Depends on M2 (the subcommand must exist before docs/lockstep reference it).",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M3.T1",
+              "title": "Lockstep `completion` into the three completion files + sync README",
+              "status": "Planned",
+              "description": "Per §14.4/§17, once `completion` is a recognized token in parseArgs (P1.M2.T1.S1), keep the three completion files consistent by offering `completion` alongside check/init as an exclusive first-positional subcommand. Then sync the README to document the eval/source one-liner (§14.6).",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M3.T1.S1",
+                  "title": "Add `completion` as a completable first-arg subcommand to all three completion files",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M2.T1.S1"],
+                  "prd_selectors": ["h2.13", "h3.14", "h3.15", "h3.16", "h3.17", "h2.16"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/003_3ace946c2a5c/architecture/completions_change_map.md for the EXACT per-file edits with line numbers. Each file implements a three-part pattern for check/init: (1) a suppression walk (stop offering once a subcommand token is seen), (2) a first-positional-only offer (check/init appear only when no positional typed yet), (3) tag completion (skilldozer --relative --all) suppressed once a subcommand is seen.\n2. INPUT: From P1.M2.T1.S1: `completion` is a recognized reserved token in parseArgs (same status as check/init). The three completion files currently offer check/init but NOT completion (verified: `completion` does not appear as a completable subcommand in any file). The files carry a generic `LOCKSTEP:` comment referencing main.go parseArgs().\n3. LOGIC: Implement §14.4 lockstep + §6.3 (completion is a reserved subcommand like check/init). For EACH of the three files, mirror the existing check/init pattern to add `completion`:\n   - `completions/skilldozer.bash` (~69 lines): (a) line ~52 suppression walk: add `|| \"${words[i]}\" == \"completion\"` to the `[[ ]]` test. (b) line ~63 first-pos offer: change `cands=\"$cands check init\"` → `cands=\"$cands check init completion\"`.\n   - `completions/_skilldozer` (~59 lines, zsh): (a) line ~46 first-pos compadd: change `compadd -- \"$tags[@]\" check init` → add `completion`. (b) line ~52 suppression: add `|| ${words[(I)completion]}` to the `if (( ))` condition.\n   - `completions/skilldozer.fish` (~51 lines): (a) after line ~44: add a new directive `complete -c skilldozer -n '__fish_is_first_arg' -a 'completion' -d 'Emit the shell completion script for eval'`. (b) line ~50 suppression predicate: change `__fish_seen_subcommand_from check init` → add `completion`.\n   Do NOT add `--shell` to any flag matrix (§14.1/§14.2: flag matrix is §6.1/§6.2 only; --shell is completion-context-only). Do NOT change tag completion (`skilldozer --relative --all 2>/dev/null` — byte-for-byte identical). Do NOT change --search/--store routing.\n4. OUTPUT: All three files offer `completion` as an exclusive first-positional subcommand (gated identically to check/init). Validation: `grep -q 'completion' completions/skilldozer.bash && grep -q 'completion' completions/_skilldozer && grep -q 'completion' completions/skilldozer.fish`. No behavioral regression in tag/flag completion.\n5. DOCS: [Mode A] the completion files ARE the user-facing surface for tab-completion — updating them here satisfies doc-with-work. These same files are embedded via //go:embed (P1.M2.T2.S1), so a rebuild is required for `skilldozer completion` to emit the updated bytes (§14.6 lockstep note)."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M3.T1.S2",
+                  "title": "README: document the `completion` subcommand as the easy install path (Mode B)",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M2.T2.S2", "P1.M3.T1.S1"],
+                  "prd_selectors": ["h3.18", "h3.19", "h2.14", "h2.11", "h3.12"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/003_3ace946c2a5c/architecture/completions_change_map.md. The README Shell completions section is at README.md:94-129. It currently documents only the manual source/copy path (§14.5) for bash/zsh/fish. The §14.6 `eval`/`source` idiom is the recommended one-liner that is NOT yet documented.\n2. INPUT: From P1.M2.T2.S2: the `completion` subcommand is fully functional (`skilldozer completion --shell bash` emits the script, shell detection works). From P1.M3.T1.S1: the three completion files now offer `completion` as a subcommand and are embedded via //go:embed. The README 'Shell completions' section (~line 94) has subsections for bash, zsh, fish (source/copy instructions) and a note that install.sh does not install completions.\n3. LOGIC: Implement PRD §14.6 README documentation (this is the Mode B changeset-level doc sync — it summarizes the entire `completion` feature). Add the §14.6 `eval`/`source` idiom as the RECOMMENDED one-liner, placed BEFORE the manual source/copy instructions:\n   - For bash/zsh: `eval \"$(skilldozer completion)\"` — add to ~/.bashrc or ~/.zshrc.\n   - For fish: `skilldozer completion --shell fish | source` — add to ~/.config/fish/config.fish.\n   - One-line note: the binary embeds the scripts (works for `go install` users with no clone — consistent with §12.2 decision 9). Note `--shell` for deterministic eval, and the `$SKILLDOZER_SHELL`/`$SHELL` fallback for auto-detection.\n   - Keep the existing manual source/copy instructions (they remain valid and pick up edits without a rebuild).\n   Do NOT duplicate the §14.6 rationale verbatim — match the README's existing concise tone.\n   Verified by: `grep -q 'skilldozer completion' README.md`.\n4. OUTPUT: README.md Shell completions section documents both paths: the recommended `eval`/`source` one-liner (new) and the manual source/copy path (existing). The binary-embeds-scripts note explains why `eval` works for go install users.\n5. DOCS: [Mode B] this IS the changeset-level documentation sync task — it depends on the feature (P1.M2.T2.S2) and the lockstep (P1.M3.T1.S1), and is the final deliverable of the delta. It summarizes the entire `completion` feature at the README level."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
