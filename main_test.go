@@ -2947,3 +2947,143 @@ func TestEmbeddedCompletionsMatchOnDisk(t *testing.T) {
 		}
 	}
 }
+
+// TestRunCompletionBashScript locks the §13 acceptance: `completion --shell bash`
+// → exit 0, stdout contains the bash-script marker, stderr empty.
+func TestRunCompletionBashScript(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"completion", "--shell", "bash"}, &out, &errOut)
+	if code != 0 {
+		t.Errorf("run(completion --shell bash): code=%d; want 0", code)
+	}
+	if !strings.Contains(out.String(), "_skilldozer_completion") {
+		t.Errorf("stdout missing _skilldozer_completion (§13):\n%s", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr=%q; want empty on success", errOut.String())
+	}
+}
+
+// TestRunCompletionFishScript locks the §13 acceptance: `completion --shell fish`
+// → exit 0, stdout contains the fish-script marker.
+func TestRunCompletionFishScript(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"completion", "--shell", "fish"}, &out, &errOut)
+	if code != 0 {
+		t.Errorf("run(completion --shell fish): code=%d; want 0", code)
+	}
+	if !strings.Contains(out.String(), "complete -c skilldozer") {
+		t.Errorf("stdout missing 'complete -c skilldozer' (§13):\n%s", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr=%q; want empty on success", errOut.String())
+	}
+}
+
+// TestRunCompletionUnsupportedShell locks §6.4 exit-2 path: an unsupported
+// --shell value (tcsh) → exit 2, NOTHING on stdout (the $(...) contract), and
+// stderr mentions the offending value.
+func TestRunCompletionUnsupportedShell(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"completion", "--shell", "tcsh"}, &out, &errOut)
+	if code != 2 {
+		t.Errorf("run(completion --shell tcsh): code=%d; want 2", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY on unsupported shell (§6.4)", out.String())
+	}
+	if !strings.Contains(errOut.String(), "tcsh") {
+		t.Errorf("stderr=%q; want it to mention 'tcsh'", errOut.String())
+	}
+}
+
+// TestRunCompletionUndetectableShell locks §6.4 exit-1 path: no --shell, no
+// $SKILLDOZER_SHELL, no usable $SHELL → exit 1, NOTHING on stdout, stderr
+// mentions "shell". Both env vars are suppressed because the test runner's own
+// $SHELL would otherwise leak into loginShellBase.
+func TestRunCompletionUndetectableShell(t *testing.T) {
+	t.Setenv("SKILLDOZER_SHELL", "")
+	t.Setenv("SHELL", "")
+	var out, errOut bytes.Buffer
+	code := run([]string{"completion"}, &out, &errOut)
+	if code != 1 {
+		t.Errorf("run(completion, no shell): code=%d; want 1", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY on undetectable shell (§6.4)", out.String())
+	}
+	if !strings.Contains(strings.ToLower(errOut.String()), "shell") {
+		t.Errorf("stderr=%q; want it to mention 'shell'", errOut.String())
+	}
+}
+
+// TestRunCompletionEnvShellDetected locks the envShell tier: $SKILLDOZER_SHELL
+// is honored and beats $SHELL (detectShell checks envShell before loginShell).
+func TestRunCompletionEnvShellDetected(t *testing.T) {
+	t.Setenv("SKILLDOZER_SHELL", "zsh")
+	var out, errOut bytes.Buffer
+	code := run([]string{"completion"}, &out, &errOut)
+	if code != 0 {
+		t.Errorf("run(completion, SKILLDOZER_SHELL=zsh): code=%d; want 0", code)
+	}
+	if !strings.Contains(out.String(), "#compdef skilldozer") {
+		t.Errorf("stdout missing zsh #compdef header:\n%s", out.String())
+	}
+}
+
+// TestRunCompletionLoginShellDetected locks the loginShell tier: basename($SHELL)
+// is honored (e.g. $SHELL=/bin/zsh → "zsh") when --shell and $SKILLDOZER_SHELL
+// are absent.
+func TestRunCompletionLoginShellDetected(t *testing.T) {
+	t.Setenv("SKILLDOZER_SHELL", "")
+	t.Setenv("SHELL", "/bin/zsh")
+	var out, errOut bytes.Buffer
+	code := run([]string{"completion"}, &out, &errOut)
+	if code != 0 {
+		t.Errorf("run(completion, SHELL=/bin/zsh): code=%d; want 0", code)
+	}
+	if !strings.Contains(out.String(), "#compdef skilldozer") {
+		t.Errorf("stdout missing zsh #compdef header (basename(/bin/zsh)=zsh):\n%s", out.String())
+	}
+}
+
+// TestDetectShell locks the pure first-non-empty selector (no env mutation):
+// explicit > envShell > loginShell; all-empty → ("", false).
+func TestDetectShell(t *testing.T) {
+	cases := []struct {
+		explicit, env, login, wantShell string
+		wantOK                          bool
+	}{
+		{"bash", "", "", "bash", true},        // explicit wins
+		{"", "fish", "", "fish", true},        // env wins
+		{"", "", "zsh", "zsh", true},          // login wins
+		{"", "", "", "", false},               // all empty → false
+		{"bash", "fish", "zsh", "bash", true}, // explicit beats env+login
+	}
+	for _, tc := range cases {
+		got, ok := detectShell(tc.explicit, tc.env, tc.login)
+		if got != tc.wantShell || ok != tc.wantOK {
+			t.Errorf("detectShell(%q,%q,%q) = (%q,%v); want (%q,%v)",
+				tc.explicit, tc.env, tc.login, got, ok, tc.wantShell, tc.wantOK)
+		}
+	}
+}
+
+// TestLoginShellBase locks loginShellBase: basename + lowercase + the empty
+// guard (filepath.Base("") → "." is the gotcha it dodges).
+func TestLoginShellBase(t *testing.T) {
+	cases := []struct {
+		shell, want string
+	}{
+		{"/bin/zsh", "zsh"},
+		{"/usr/bin/fish", "fish"},
+		{"/bin/ZSH", "zsh"}, // lowercased
+		{"", ""},            // empty guard (filepath.Base("") would be ".")
+	}
+	for _, tc := range cases {
+		t.Setenv("SHELL", tc.shell)
+		if got := loginShellBase(); got != tc.want {
+			t.Errorf("loginShellBase() with SHELL=%q = %q; want %q", tc.shell, got, tc.want)
+		}
+	}
+}

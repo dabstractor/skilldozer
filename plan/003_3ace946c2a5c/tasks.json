@@ -45,7 +45,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "`completion` subcommand: parse, dispatch, embed, detect shell",
-          "status": "Researching",
+          "status": "Complete",
           "description": "The bulk of the delta. Add the `completion` reserved subcommand to main.go: config fields, parseArgs token + --shell flag handling, exclusivity, run() dispatch, //go:embed of the three completion scripts, shell detection, and the usageText updates. Depends on M1's stream discipline (completion writes the script ONLY to stdout; errors ONLY to stderr).",
           "tasks": [
             {
@@ -81,7 +81,7 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "`//go:embed`, dispatch, and shell detection",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Wire the completion subcommand end-to-end: embed the three completion scripts via //go:embed, add the run() dispatch slot, implement shell detection (--shell → $SKILLDOZER_SHELL → basename($SHELL) → exit 1) and the exit-code matrix (unsupported --shell value → exit 2).",
               "subtasks": [
                 {
@@ -102,7 +102,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T2.S2",
                   "title": "`run()` dispatch + shell detection + exit codes",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S1",
@@ -140,7 +140,7 @@
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "Add `completion` as a completable first-arg subcommand to all three completion files",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S1"

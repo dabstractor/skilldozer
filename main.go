@@ -531,6 +531,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runInit(c, stdout, stderr)
 	}
 
+	// completion dispatch (PRD §14.6). completion is an exclusive mode (like
+	// check/init): exclusivityError above guarantees no other mode is set when
+	// c.completion is true, so this self-contained branch returns before the
+	// path/list/search/check/all/tags ladder below. runCompletion resolves the
+	// shell (--shell → $SKILLDOZER_SHELL → basename($SHELL)), emits the matching
+	// embedded script to stdout (exit 0), or exits 1 (undetectable) / 2
+	// (unsupported value) with nothing on stdout (PRD §6.4).
+	if c.completion {
+		return runCompletion(c, stdout, stderr)
+	}
+
 	// 5) Normal mode dispatch (order: path → list → search → check → all →
 	//    tags). Each branch body is byte-identical to pre-M5 (any mode that
 	//    reaches here is guaranteed standalone: exclusivityError caught
@@ -1201,4 +1212,77 @@ func runInit(c config, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stderr, "%d skills, %d errors, %d warnings\n", len(skills), rep.Errors, rep.Warnings)
 	return 0 // setup succeeded; check findings do not change init's exit code
+}
+
+// loginShellBase returns the lowercased basename of $SHELL — "zsh" for /bin/zsh,
+// "fish" for /usr/bin/fish — or "" if $SHELL is unset/empty. It is the third-tier
+// input to detectShell (PRD §14.6 "basename($SHELL)"). The empty guard is
+// load-bearing: filepath.Base("") returns ".", which would otherwise pollute
+// shell detection (external_deps.md §Shell detection verified this).
+// os.Executable() is NOT used — that is the skilldozer binary path, not the shell.
+// strings.ToLower normalizes e.g. /bin/ZSH → "zsh" so completionScript's
+// case-sensitive switch still matches (explicit --shell / $SKILLDOZER_SHELL
+// values pass through detectShell verbatim, not lowercased).
+func loginShellBase() string {
+	s := os.Getenv("SHELL")
+	if s == "" {
+		return ""
+	}
+	return strings.ToLower(filepath.Base(s))
+}
+
+// detectShell resolves the target shell for `skilldozer completion` (PRD §14.6
+// "Shell detection", first wins): explicit --shell → $SKILLDOZER_SHELL →
+// basename($SHELL). It is a PURE function of its three string args — the caller
+// (runCompletion) supplies the env reads (c.completionShell,
+// os.Getenv("SKILLDOZER_SHELL"), loginShellBase()) — so detection is
+// unit-testable without env mutation. It returns the first non-empty value +
+// true, or ("", false) if all three are empty. Values pass through VERBATIM:
+// only loginShellBase lowercases (it computes the basename), so an explicit
+// `--shell BASH` yields "BASH" → unsupported (completionScript is
+// case-sensitive) → exit 2.
+func detectShell(explicit, envShell, loginShell string) (string, bool) {
+	if explicit != "" {
+		return explicit, true
+	}
+	if envShell != "" {
+		return envShell, true
+	}
+	if loginShell != "" {
+		return loginShell, true
+	}
+	return "", false
+}
+
+// runCompletion is the `skilldozer completion` handler (PRD §14.6 / §6.4).
+// run()'s dispatch calls it when c.completion is true; completion is exclusive,
+// so no other mode is active. It resolves the shell via detectShell, then emits
+// the matching embedded script to stdout for `eval "$(skilldozer completion)"`
+// (PRD §14.6). Exit codes (PRD §6.4):
+//   - 0 on success (script on stdout);
+//   - 1 if the shell is undetectable (no --shell, no $SKILLDOZER_SHELL, no
+//     usable $SHELL);
+//   - 2 if the resolved shell value is not bash/zsh/fish (e.g. tcsh, or
+//     $SHELL=/bin/sh → "sh").
+//
+// On the 1/2 paths NOTHING is written to stdout (the §6.4 $(...) contract:
+// `eval` of an empty capture fails cleanly rather than running a partial/garbage
+// script). The script is emitted with Fprint (NOT Fprintln) so the bytes are
+// identical to the embedded file (§14.6 byte-identity).
+func runCompletion(c config, stdout, stderr io.Writer) int {
+	shell, ok := detectShell(c.completionShell, os.Getenv("SKILLDOZER_SHELL"), loginShellBase())
+	if !ok {
+		// Undetectable: all three sources empty (PRD §6.4). Nothing on stdout.
+		fmt.Fprintln(stderr, "could not detect shell; pass --shell {bash|zsh|fish}")
+		return 1
+	}
+	script, ok := completionScript(shell)
+	if !ok {
+		// Detected but unsupported (e.g. tcsh; or $SHELL=/bin/sh → "sh"). Nothing on stdout.
+		fmt.Fprintf(stderr, "skilldozer: unsupported shell '%s' (want bash|zsh|fish)\n", shell)
+		return 2
+	}
+	// Success: the matching embedded script, byte-identical to completions/* (PRD §14.6).
+	fmt.Fprint(stdout, script)
+	return 0
 }
