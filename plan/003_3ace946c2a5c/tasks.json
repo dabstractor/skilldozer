@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "`completion` subcommand + no-args implicit help",
-      "status": "Researching",
+      "status": "Complete",
       "description": "Implement the two PRD changes introduced by commit bbd4e74 (which touched PRD.md only): (A) bare invocation flips from stderr/exit-1 to stdout/exit-0 implicit help (§6.3, decision 17); (B) new `completion` subcommand that emits shell completion scripts to stdout for `eval` (§14.6, decision 18). The codebase is an existing, fully working Go CLI from sessions 001+002 — all tests pass. This delta closes the code/PRD gap. Do NOT redesign existing subsystems (discovery, config, resolve, check). Reference plan/003_3ace946c2a5c/architecture/ for verified line numbers and mirror patterns.",
       "milestones": [
         {
@@ -126,14 +126,14 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Completion-file lockstep + changeset-level documentation (Mode B)",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Add `completion` as a completable first-arg subcommand to all three shell completion files (§14.4 lockstep invariant — once `completion` is a recognized token in parseArgs, the completion files must offer it). Then sync the README to document the `completion` subcommand as the easy install path (Mode B — changeset-level doc sync). Depends on M2 (the subcommand must exist before docs/lockstep reference it).",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "Lockstep `completion` into the three completion files + sync README",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Per §14.4/§17, once `completion` is a recognized token in parseArgs (P1.M2.T1.S1), keep the three completion files consistent by offering `completion` alongside check/init as an exclusive first-positional subcommand. Then sync the README to document the eval/source one-liner (§14.6).",
               "subtasks": [
                 {
@@ -159,7 +159,7 @@
                   "type": "Subtask",
                   "id": "P1.M3.T1.S2",
                   "title": "README: document the `completion` subcommand as the easy install path (Mode B)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T2.S2",

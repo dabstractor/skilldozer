@@ -97,6 +97,28 @@ your home directory.
 not a static list: the shell calls `skilldozer --relative --all` at completion time,
 so it never goes stale as you add skills.
 
+The easiest way to load completions is the `completion` subcommand, which prints
+the script for your shell to eval. The binary embeds the completion scripts, so
+this works for `go install` users with no clone.
+
+**bash / zsh** — add to `~/.bashrc` or `~/.zshrc`:
+
+```bash
+eval "$(skilldozer completion)"
+```
+
+**fish** — add to `~/.config/fish/config.fish`:
+
+```bash
+skilldozer completion --shell fish | source
+```
+
+`--shell <bash|zsh|fish>` makes the eval deterministic; otherwise
+`skilldozer completion` auto-detects from `$SKILLDOZER_SHELL`, then `$SHELL`.
+
+Prefer to copy the file instead? The manual path below picks up edits to
+`completions/*` without a rebuild.
+
 **bash** (one of):
 
 ```bash
