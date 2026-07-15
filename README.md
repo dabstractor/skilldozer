@@ -133,7 +133,7 @@ skilldozer --relative example
 # Disable ANSI color even on a TTY (for --list / --search tables)
 skilldozer --no-color --list
 
-# Version is the git-describe value (dynamic, not a fixed string)
+# Version is the git-describe value when built via ./install.sh; a plain 'go build' reports 'dev'
 skilldozer --version
 
 # Short flags combine (-af) and long flags accept --flag=value (--search=reddit)

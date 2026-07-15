@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Bugfix Round 2 — Completion, Discovery Safety, and CLI Consistency",
-      "status": "Planned",
+      "status": "Researching",
       "description": "Fix two Major issues (--shell completion value routing; vanished configured store silently falling through) and three Minor issues (inconsistent missing-value exit codes for --search/--shell; POSIX -- separator rejected; README version doc inaccuracy). All five issues are explicitly specified in the PRD and validated against the current codebase. The changes touch completion files, internal/skillsdir, main.go parseArgs/run, and README.md.",
       "milestones": [
         {
@@ -94,7 +94,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Minor Issues (Nice to Fix)",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Issue 3: --search/--shell with no value print help (exit 0) while --store exits 2 — make them symmetrical. Issue 4: POSIX -- end-of-options separator is rejected as an unknown flag. Issue 5: README version documentation is inaccurate for plain go build. Issues 3 and 4 both modify parseArgs() in main.go and should be applied sequentially to avoid conflicts.",
           "tasks": [
             {
@@ -149,14 +149,14 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "Fix README version documentation accuracy (Issue 5)",
-              "status": "Ready",
+              "status": "Complete",
               "description": "The README states 'Version is the git-describe value (dynamic, not a fixed string)' but this is only true for the install.sh build. A plain go build (the README's own 'From source' path) yields 'dev'. Tighten the documentation to reflect reality.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T3.S1",
                   "title": "Clarify version string documentation in README",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_5851dcff4371/bugfix/001_ba6f35f74a59/architecture/issue_analysis.md §Issue 5. The README.md 'Usage' section contains the comment line: `# Version is the git-describe value (dynamic, not a fixed string)`. The version var is at main.go:57: `var version = \"dev\"`. The install.sh script injects `-ldflags \"-X main.version=$(git describe --tags --always 2>/dev/null || echo dev)\"` but a plain `go build -o skilldozer .` (README's 'From source' path C) does NOT, yielding `skilldozer dev`. The 'From source' section is at README.md around the `go build -o skilldozer .` instruction.\n2. INPUT: README.md (read the Usage and Install sections to find the exact line and surrounding context).\n3. LOGIC: Change the comment line from `# Version is the git-describe value (dynamic, not a fixed string)` to `# Version is the git-describe value when built via ./install.sh; a plain 'go build' reports 'dev'`. This accurately describes both build paths. Keep the line as a bash comment (prefixed with #) in the Usage examples block.\n4. OUTPUT: Modified README.md with the corrected version documentation line.\n5. DOCS: [Mode A] This subtask IS a documentation fix. The README change is the entire deliverable. No code changes.",
@@ -174,21 +174,21 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Changeset-Level Documentation Sync",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Cross-cutting documentation sweep to ensure the README, help text, and completion file headers are consistent after all five issues are fixed. This is the Mode B catch-all that prevents a coherent delta from shipping with a stale overview.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "Sync changeset-level documentation",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Verify README.md, usageText in main.go, and completion file headers are consistent with all changes from this bugfix round. Check that --shell is documented everywhere it should be, the error contract section reflects the new exit-2 behavior for --search/--shell, and the POSIX -- convention is mentioned if appropriate.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "Sweep README, help text, and completion headers for changeset consistency",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",
