@@ -15,6 +15,8 @@
 # but are not advertised. Updated for --check/--init/--completions (decision 19):
 # these were promoted from bare subcommands so the bare positional namespace
 # belongs to skill tags — a bare <tab> shows skills, never commands.
+# --shell's value completes to the bash/zsh/fish enum (§14.2); --shell is
+# advertised (D7) since it is a real, documented flag in usageText OPTIONS.
 _skilldozer_completion() {
     local cur prev words cword
     # _init_completion (from the bash-completion package) sets cur/prev/words/cword.
@@ -33,16 +35,18 @@ _skilldozer_completion() {
     # Value-taking flags: route the value slot away from tag completion.
     #   --search        -> free-text query  -> offer NOTHING (return 0 with empty COMPREPLY).
     #   --store/--init  -> directory value  -> complete DIRECTORIES via compgen -d.
+    #   --shell         -> fixed enum       -> offer "bash zsh fish" via compgen -W.
     # (--store/--init WANT path completion, unlike --search's free-text -> nothing.)
     case "$prev" in
         --search) return 0 ;;
         --store|--init) COMPREPLY=($(compgen -d -- "$cur")); return 0 ;;
+        --shell) COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur")); return 0 ;;
     esac
 
     # Flag completion when the current token starts with '-' (long-form only — decision 20).
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W \
-            "--version --help --path --list --all --file --relative --no-color --search --store --check --init --completions" \
+            "--version --help --path --list --all --file --relative --no-color --search --store --shell --check --init --completions" \
             -- "$cur"))
         return 0
     fi

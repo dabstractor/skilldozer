@@ -3,3 +3,9 @@
 *.test
 *.out
 .DS_Store
+
+# Standard hygiene (build / deps / env)
+build/
+node_modules/
+venv/
+.env
