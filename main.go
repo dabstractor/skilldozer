@@ -1107,7 +1107,9 @@ func setupStore(store, configPath string) (seeded bool, err error) {
 // package-scope //go:embed vars (PRD §14.6) — no filesystem access. The bool lets runCompletion
 // (P1.M2.T2.S2) distinguish a known shell from an unsupported one (the §6.4 exit-2 path).
 // The bytes are verbatim from completions/* (the single source of truth); see
-// TestEmbeddedCompletionsMatchOnDisk for the byte-identity lock.
+// TestEmbeddedCompletionsMatchOnDisk for the byte-identity lock. runCompletion emits these
+// verbatim for bash/fish but DERIVES the eval-safe zsh wrapper via zshEvalScript — the
+// completionScript return value stays byte-identical to the on-disk autoload file.
 func completionScript(shell string) (string, bool) {
 	switch shell {
 	case "bash":
@@ -1119,6 +1121,51 @@ func completionScript(shell string) (string, bool) {
 	}
 	return "", false
 }
+
+// zshEvalScript derives an eval-safe zsh completion wrapper from the verbatim autoload file
+// (the embedded zshCompletion / completions/_skilldozer). The on-disk file is an autoload
+// function: it sits on fpath, the `#compdef skilldozer` magic comment binds it to the command,
+// and its trailing `_skilldozer "$@"` self-call is the standard idiom that fires the function
+// when zsh first autoloads it (by which point compsys — _arguments/_files/compadd — is loaded).
+//
+// None of that holds under `eval "$(skilldozer --completions)"` (PRD §14.6):
+//   - `#compdef skilldozer` is an INERT COMMENT when the script is eval'd (it only binds
+//     autoload files that compinit scans off fpath), so the function never gets registered.
+//   - the trailing `_skilldozer "$@"` self-call runs the function IMMEDIATELY in the user's
+//     .zshrc, before compsys is guaranteed loaded, hitting _arguments at line 31 →
+//     `_skilldozer:31: command not found: _arguments`.
+//
+// So we strip the self-call and append an explicit compdef registration plus a compinit
+// bootstrap that is a no-op once compsys is already loaded (oh-my-zsh / prezto / a manual
+// `autoload -U compinit && compinit` all define compdef). completionScript keeps returning
+// the verbatim bytes (the §14.6 byte-identity lock); this derivation lives in runCompletion.
+func zshEvalScript(raw string) string {
+	// The autoload file ends with:   ...esac\n}\n\n_skilldozer "$@"\n
+	// LastIndex (not a suffix trim) is robust to trailing-comment drift, and the function
+	// body never references its own name, so the one match is the self-call. TrimRight
+	// collapses the blank line(s) so the body ends cleanly at the closing brace.
+	const call = "_skilldozer \"$@\"\n"
+	body := raw
+	if i := strings.LastIndex(raw, call); i >= 0 {
+		body = strings.TrimRight(raw[:i], "\n") + "\n"
+	}
+	return body + zshEvalRegistration
+}
+
+// zshEvalRegistration is appended to the stripped autoload body to make it eval-safe. Its own
+// const so a test can lock the exact registration contract (compdef binding + the no-op-when-
+// loaded compinit bootstrap). No backticks inside: it is a Go raw string literal.
+const zshEvalRegistration = `
+# Register the completion for eval. The #compdef header above only binds this as an
+# autoload file on fpath; under eval it is inert, so bind the function explicitly.
+# compsys (_arguments/_files/compadd) is bootstrapped only if not already loaded —
+# oh-my-zsh / prezto / a manual compinit all define compdef, making the compinit
+# below a no-op. The autoload file's trailing self-call is intentionally omitted:
+# it would fire the function at eval time, before _arguments is guaranteed to exist.
+autoload -Uz compinit
+(( $+functions[compdef] )) || compinit
+(( $+functions[compdef] )) && compdef _skilldozer skilldozer
+`
 
 // runInit is the `skilldozer --init` orchestrator (PRD §8.2). run()'s dispatch calls it
 // when c.init is true (init is exclusive, so no other mode is active). It assembles the
@@ -1257,8 +1304,11 @@ func detectShell(explicit, envShell, loginShell string) (string, bool) {
 //
 // On the 1/2 paths NOTHING is written to stdout (the §6.4 $(...) contract:
 // `eval` of an empty capture fails cleanly rather than running a partial/garbage
-// script). The script is emitted with Fprint (NOT Fprintln) so the bytes are
-// identical to the embedded file (§14.6 byte-identity).
+// script). Emitted with Fprint (NOT Fprintln). bash/fish are the verbatim
+// embedded bytes (§14.6 byte-identity); zsh is a DERIVED eval-safe wrapper
+// (zshEvalScript) — the on-disk autoload file ends with a `_skilldozer "$@"`
+// self-call that would fire the function at eval time, before compsys is loaded
+// (→ `command not found: _arguments`), and its `#compdef` header is inert eval'd.
 func runCompletion(c config, stdout, stderr io.Writer) int {
 	shell, ok := detectShell(c.completionShell, os.Getenv("SKILLDOZER_SHELL"), loginShellBase())
 	if !ok {
@@ -1272,7 +1322,14 @@ func runCompletion(c config, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "skilldozer: unsupported shell '%s' (want bash|zsh|fish)\n", shell)
 		return 2
 	}
-	// Success: the matching embedded script, byte-identical to completions/* (PRD §14.6).
+	// Success. bash/fish: emit the embedded bytes verbatim. zsh: emit the DERIVED
+	// eval-safe wrapper — the autoload file's trailing `_skilldozer "$@"` self-call
+	// fires the function immediately under eval (→ `command not found: _arguments`
+	// before compsys is loaded) and its `#compdef` header is inert eval'd, so it needs
+	// an explicit compdef registration. See zshEvalScript (PRD §14.6).
+	if shell == "zsh" {
+		script = zshEvalScript(script)
+	}
 	fmt.Fprint(stdout, script)
 	return 0
 }

@@ -542,7 +542,9 @@ Key points:
 
 #### Embedding (self-sufficient binary)
 
-The three scripts in `completions/` are compiled into the binary with `//go:embed` (stdlib, **no new dependency**). This makes `--completions` work for `go install` users with **no repo clone** — consistent with the "binary is self-sufficient" decision (§12.2 / decision 9). The on-disk `completions/` files remain the **single source of truth**; §14.5's manual source/copy path and this flag emit identical bytes (both read the same files).
+The three scripts in `completions/` are compiled into the binary with `//go:embed` (stdlib, **no new dependency**). This makes `--completions` work for `go install` users with **no repo clone** — consistent with the "binary is self-sufficient" decision (§12.2 / decision 9). The on-disk `completions/` files remain the **single source of truth**; `completionScript` returns them verbatim (locked by `TestEmbeddedCompletionsMatchOnDisk`).
+
+> **bash/fish vs zsh emit path.** bash and fish are emitted **verbatim** — §14.5's manual source/copy path and this flag produce identical bytes. zsh is **derived**: `runCompletion` passes the embedded autoload file through `zshEvalScript`, which (a) strips the trailing `_skilldozer "$@"` self-call and (b) appends an explicit `compdef _skilldozer skilldozer` registration plus a guarded `compinit` bootstrap. The autoload file is correct **as an fpath autoload** (the `#compdef skilldozer` header binds it; the self-call is the standard autoload idiom that fires once compsys is loaded), but it is **not eval-safe**: under `eval "$(skilldozer --completions)"` the `#compdef` header is an inert comment and the self-call runs the function immediately, hitting `_arguments` before compsys is guaranteed loaded (`_skilldozer:31: command not found: _arguments`). The §14.5 manual path (copy the file onto `fpath` + `compinit`) keeps using the verbatim autoload file; the `--completions` eval path uses the derived wrapper.
 
 #### Lockstep (extends §14.4)
 

@@ -3113,6 +3113,89 @@ func TestRunCompletionLoginShellDetected(t *testing.T) {
 	}
 }
 
+// TestZshEvalScriptStripsSelfCall locks the core fix for the
+// `_skilldozer:31: command not found: _arguments` bug. The on-disk autoload file
+// completions/_skilldozer ends with a `_skilldozer "$@"` self-call — the standard
+// idiom for an fpath autoload function. Under `eval "$(skilldozer --completions)"`
+// that call fires the function immediately in the user's .zshrc, before compsys
+// (_arguments/_files/compadd) is guaranteed loaded. zshEvalScript must strip it.
+func TestZshEvalScriptStripsSelfCall(t *testing.T) {
+	raw, ok := completionScript("zsh")
+	if !ok {
+		t.Fatalf("completionScript(zsh): ok=false")
+	}
+	// Sanity: the verbatim embed DOES carry the self-call (guards against a future
+	// edit that removes it from the source file, which would make this test vacuous).
+	if !strings.HasSuffix(raw, "_skilldozer \"$@\"\n") {
+		t.Fatalf("embed no longer ends with the self-call; test premise is stale")
+	}
+	got := zshEvalScript(raw)
+	// The self-call line must NOT appear as a top-level statement in the eval output.
+	if strings.Contains(got, "\n_skilldozer \"$@\"") {
+		t.Errorf("zshEvalScript: eval output still contains the `_skilldozer \"$@\"` self-call (the _arguments bug):\n%s", got)
+	}
+}
+
+// TestZshEvalScriptRegistersCompdef locks the second half of the fix: under eval
+// the `#compdef skilldozer` header is an inert comment (it only binds autoload
+// files compinit scans off fpath), so the function would never be registered.
+// zshEvalScript must append an explicit compdef binding + a guarded compinit
+// bootstrap (no-op once compsys is already loaded).
+func TestZshEvalScriptRegistersCompdef(t *testing.T) {
+	raw, ok := completionScript("zsh")
+	if !ok {
+		t.Fatalf("completionScript(zsh): ok=false")
+	}
+	got := zshEvalScript(raw)
+	for _, want := range []string{
+		"autoload -Uz compinit",
+		"(( $+functions[compdef] )) || compinit", // bootstrap only if compdef absent
+		"compdef _skilldozer skilldozer",         // explicit registration
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("zshEvalScript: missing %q in eval output:\n%s", want, got)
+		}
+	}
+	// The body is otherwise intact: the function definition and its header survive.
+	if !strings.Contains(got, "#compdef skilldozer") {
+		t.Errorf("zshEvalScript: dropped the #compdef header from the body:\n%s", got)
+	}
+	if !strings.Contains(got, "_arguments -C") {
+		t.Errorf("zshEvalScript: dropped the _arguments call from the body:\n%s", got)
+	}
+}
+
+// TestRunCompletionZshIsEvalSafe is the end-to-end lock on runCompletion's zsh
+// path: the emitted script is the DERIVED wrapper (not the verbatim autoload
+// file), so it carries the compdef registration and NOT the self-call. This is
+// the test that directly corresponds to `eval "$(skilldozer --completions)"`.
+func TestRunCompletionZshIsEvalSafe(t *testing.T) {
+	t.Setenv("SKILLDOZER_SHELL", "zsh")
+	var out, errOut bytes.Buffer
+	code := run([]string{"--completions"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(completion, zsh): code=%d; want 0", code)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr=%q; want empty on success", errOut.String())
+	}
+	script := out.String()
+	if strings.Contains(script, "\n_skilldozer \"$@\"") {
+		t.Errorf("zsh eval output contains the self-call (the _arguments bug):\n%s", script)
+	}
+	if !strings.Contains(script, "compdef _skilldozer skilldozer") {
+		t.Errorf("zsh eval output missing compdef registration:\n%s", script)
+	}
+	// And it must NOT equal the verbatim autoload file (the derivation is load-bearing).
+	onDisk, err := os.ReadFile("completions/_skilldozer")
+	if err != nil {
+		t.Fatalf("os.ReadFile: %v", err)
+	}
+	if script == string(onDisk) {
+		t.Errorf("zsh eval output == on-disk autoload file; expected the DERIVED wrapper")
+	}
+}
+
 // TestDetectShell locks the pure first-non-empty selector (no env mutation):
 // explicit > envShell > loginShell; all-empty → ("", false).
 func TestDetectShell(t *testing.T) {
