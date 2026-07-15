@@ -13,6 +13,8 @@
 # but are not advertised. Updated for --check/--init/--completions (decision 19):
 # these were promoted from bare subcommands so the bare positional namespace
 # belongs to skill tags — a bare <tab> shows skills, never commands.
+# --shell's value completes to the bash/zsh/fish enum (§14.2); --shell is
+# advertised (D7) since it is a real, documented flag in usageText OPTIONS.
 
 # No file completion: skilldozer takes tags/flags, not paths.
 complete -c skilldozer -f
@@ -48,6 +50,12 @@ complete -c skilldozer -l search -d 'Substring search over tag/name/description/
 # `-f` above and offers file/dir paths for the value. This is the intentional
 # INVERSE of --search's no-`-r` (free-text -> offer nothing). No short form.
 complete -c skilldozer -l store -d 'Non-interactive store path for init' -r
+# --shell <name> (PRD §14.2): Force a shell for completion. The value is a FIXED
+# enum (bash/zsh/fish), so use `-x` (exclusive: require a value, NO file
+# completion) + `-a "bash zsh fish"` (the three candidates). This is the THIRD
+# value-routing pattern: --search = nothing (no flag), --store/--init = files
+# (-r), --shell = closed enum (-x -a). --shell is advertised (decision D7).
+complete -c skilldozer -l shell -d 'Force a shell for completion' -x -a "bash zsh fish"
 
 # Dynamic tags: ONE directive with command substitution (NOT a hardcoded line per
 # tag — the store is manifest-free and changes as skills are added). Suppressed
