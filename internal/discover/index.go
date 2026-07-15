@@ -54,6 +54,7 @@ import (
 //     not under the resolved target).
 //   - realPath: the EvalSymlinks canonical target. It is what is actually read, and
 //     its string form is the cycle-detection key.
+//
 // Cycles are broken by a visited set of canonical real paths: a symlink that points
 // at an ancestor (or any already-entered dir) resolves to a string already in the
 // set and is skipped, so the walk always terminates. (Bind-mount cycles, which

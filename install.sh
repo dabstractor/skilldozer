@@ -6,8 +6,9 @@
 # it into a PATH dir (never copies — the symlink is load-bearing for §8.2
 # sibling-of-binary skill resolution).
 #
-# Does NOT install completions: that is a separate task (P1.M6.T15.S1); PRD §14
-# allows deferral. A pointer is printed at the end.
+# Does NOT install completions by DESIGN: the binary must not write outside its
+# target bin dir (PRD §12.1). Completions ship in the repo's completions/ dir
+# (§14.5); a pointer to them is printed at the end of this script.
 set -euo pipefail
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -92,11 +93,14 @@ esac
 # --- §12.1 step 7: verify (absolute symlink path works pre-PATH-reload) ------
 # Use the ABSOLUTE symlink path (Gotcha 8): it works even before the new PATH
 # entry is live in the current shell; bare `skilldozer` may hit a stale hash until reload.
+# Only --version is verified here: resolving a tag depends on the user's discovery
+# setup (env/config/sibling), so `example` may legitimately fail for a configured
+# user whose store does not contain it — that is not an install failure. Making
+# the tag check fatal would break the `git pull && ./install.sh` upgrade path.
 echo
 echo "Verify:"
 "$TARGET/skilldozer" --version
-"$TARGET/skilldozer" example
 
 echo
 echo "Done. Reload your shell (exec \$SHELL), then run:  skilldozer example"
-echo "(Shell completions are not installed by this script — see task P1.M6.T15.S1.)"
+echo "(Shell completions are not installed by this script — see completions/ in the repo, PRD §14.5.)"

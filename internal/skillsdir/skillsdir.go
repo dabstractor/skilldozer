@@ -3,7 +3,7 @@
 // It implements the PRD §8.3 priority order (first hit wins):
 //
 //  1. SKILLDOZER_SKILLS_DIR env var — override; if set and an existing dir, use it as-is.
-//  2. Config file `store` (PRD §8.1) — the primary, set by `skilldozer init`.
+//  2. Config file `store` (PRD §8.1) — the primary, set by `skilldozer --init`.
 //  3. Sibling of the running binary (symlink-aware via os.Executable + EvalSymlinks).
 //  4. Walk up from the current working directory.
 //  5. None ⇒ unconfigured: Find returns ErrNotFound; the caller prints a one-line
@@ -91,7 +91,7 @@ func findEnv() (dir string, src Source, found bool) {
 
 // findConfig implements PRD §8.3 rule 2 — the config file's `store` key (PRD §8.1).
 //
-// It is the primary discovery rule, set by `skilldozer init`. config.Path() gives the
+// It is the primary discovery rule, set by `skilldozer --init`. config.Path() gives the
 // one fixed, well-known bootstrap path ($SKILLDOZER_CONFIG or $XDG_CONFIG_HOME/skilldozer/
 // config.yaml); config.Load() reads+unmarshals it (unknown keys ignored; broken YAML is a
 // hard error). findConfig treats ANY error from either as "not yet configured -> fall
