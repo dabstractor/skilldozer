@@ -18,7 +18,7 @@
               "type": "Task",
               "id": "P1.M1.T1",
               "title": "Fix --shell value completion to offer the bash/zsh/fish enum (Issue 1)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "All three shell completion files (bash, zsh, fish) are missing --shell value routing. After --shell, tab-completion offers skill tags instead of the fixed enum bash/zsh/fish. Each file needs a --shell value-completion directive added. The files are embedded via //go:embed so they must be modified on disk and rebuilt; TestEmbeddedCompletionsMatchOnDisk verifies byte-identity automatically.",
               "subtasks": [
                 {
@@ -39,7 +39,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S2",
                   "title": "Add --shell value entry and flag advertisement to zsh completion file",
-                  "status": "Researching",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_5851dcff4371/bugfix/001_ba6f35f74a59/architecture/issue_analysis.md §Issue 1 and decisions.md §D7. The file is completions/_skilldozer. It is embedded via //go:embed at main.go (var zshCompletion). The file defines a `local -a flags=( ... )` array with _arguments entries. Existing value-taking entries use the pattern `'--search[Description]:query:'` (free-text) and `'--store[Description]:directory:_files'` (path completion). There is NO --shell entry. The `*: :->args` catch-all at the end routes unmatched positional slots to tag completion.\n2. INPUT: Read completions/_skilldozer in full first to confirm exact line numbers and surrounding context.\n3. LOGIC: (a) Add a new entry to the `flags=( ... )` array for --shell, placed after the --completions entry: `'--shell[Force a shell for completion]:shell:(bash zsh fish)'`. The `:shell:(bash zsh fish)` syntax tells _arguments that the value slot offers the three words in the parenthesized list. (b) Keep the LOCKSTEP comment header intact. No other changes needed — _arguments handles the routing automatically once the entry is in the array.\n4. OUTPUT: Modified completions/_skilldozer. After `go build`, the embedded bytes match (TestEmbeddedCompletionsMatchOnDisk passes). In zsh, `skilldozer --shell <TAB>` offers bash, zsh, fish (not skill tags).\n5. DOCS: [Mode A] The completion file's header comment already documents the LOCKSTEP constraint. Verify the flag list comment mentions --shell. No external doc change needed.",
@@ -53,7 +53,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S3",
                   "title": "Add --shell value directive and flag advertisement to fish completion file",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_5851dcff4371/bugfix/001_ba6f35f74a59/architecture/issue_analysis.md §Issue 1 and decisions.md §D7. The file is completions/skilldozer.fish. It is embedded via //go:embed at main.go (var fishCompletion). The file uses individual `complete -c skilldozer -l <flag> -d '<desc>'` directives. Value-taking flags like --store use `-r` (require a value, route to file completion). --search deliberately does NOT use `-r` (free-text → offer nothing). There is NO --shell directive. The dynamic tag completion directive at the bottom fires for unmatched positionals.\n2. INPUT: Read completions/skilldozer.fish in full first to confirm exact line numbers.\n3. LOGIC: Add a new directive after the --store line: `complete -c skilldozer -l shell -d 'Force a shell for completion' -x -a \"bash zsh fish\"`. The `-x` flag means \"no file completion\" (exclusive), and `-a \"bash zsh fish\"` provides the three enum values. This is the INVERSE of --store's `-r` (which routes to file completion): --shell offers a fixed enum, not files. Keep the LOCKSTEP comment header intact.\n4. OUTPUT: Modified completions/skilldozer.fish. After `go build`, the embedded bytes match (TestEmbeddedCompletionsMatchOnDisk passes). In fish, `skilldozer --shell <TAB>` offers bash, zsh, fish (not skill tags).\n5. DOCS: [Mode A] The completion file's header comment already documents the LOCKSTEP constraint. Verify the flag list comment mentions --shell. No external doc change needed.",
