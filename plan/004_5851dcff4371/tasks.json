@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "CLI contract conversion (check/init/completion → --check/--init/--completions)",
-          "status": "Researching",
+          "status": "Complete",
           "description": "The behavioral core. After M1, bare words are tags and the three actions are flags. All existing subsystems keep working; only the parsing/dispatch/error-message layer and tests change. M1.T1 is code; M1.T2 is usage/error strings; M1.T3 is tests.",
           "tasks": [
             {
@@ -60,14 +60,14 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "usageText rewrite + error string updates + function doc comments",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Rewrite the usageText constant (the --help / no-args surface) to show --check/--init/--completions flags, update all error prefix strings that reference bare 'init', and update function doc comments that reference the bare 'completion' subcommand.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Rewrite usageText + update all error prefix strings + doc comments",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S1"

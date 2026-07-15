@@ -40,7 +40,7 @@ go install github.com/dabstractor/skilldozer@latest
 ```
 
 `go install` lands the binary in `$(go env GOPATH)/bin`. On first use, run
-`skilldozer init` (see First run, below) — it creates the store and writes the
+`skilldozer --init` (see First run, below) — it creates the store and writes the
 config. No clone required, and no `SKILLDOZER_SKILLS_DIR` needed for normal use.
 
 **C. From source**
@@ -60,10 +60,10 @@ Run `./skilldozer example` from the repo, or use the symlink from anywhere.
 
 ### First run
 
-Whichever install path you used, run `skilldozer init` once:
+Whichever install path you used, run `skilldozer --init` once:
 
 ```bash
-skilldozer init
+skilldozer --init
 ```
 
 It prompts for the directory where skilldozer should keep your skills
@@ -73,81 +73,23 @@ template if it is empty, and writes the config pointing at it. For scripts / CI,
 skip the prompt:
 
 ```bash
-skilldozer init /path/to/store      # positional
-skilldozer init --store /path/to/store
+skilldozer --init /path/to/store      # positional
+skilldozer --init --store /path/to/store
 ```
 
-`--store <dir>` implies `init`, so it works on its own as a first-class
+`--store <dir>` implies `--init`, so it works on its own as a first-class
 non-interactive form: `skilldozer --store /path/to/store` runs the full setup
 and writes the config. (Use one of the forms above in scripts when you want the
-intent to be self-evident; bare `--store` with an `init` token is the canonical
-shape.) Because `--store` implies init, it cannot be combined with tag
-arguments: `skilldozer --store /path mytag` exits 2 — it is an init, not a
+intent to be self-evident; bare `--store` with an `--init` token is the canonical
+shape.) Because `--store` implies `--init`, it cannot be combined with tag
+arguments: `skilldozer --store /path mytag` exits 2 — it is `--init`, not a
 one-off store override for a single resolution.
 
-On success, `init` prints exactly the configured store path to stdout — one clean
-line, so `STORE="$(skilldozer init --store /path)"` works in scripts. The
-seeded/adopted status and the post-setup `check` report go to stderr. A leading
+On success, `--init` prints exactly the configured store path to stdout — one clean
+line, so `STORE="$(skilldozer --init --store /path)"` works in scripts. The
+seeded/adopted status and the post-setup `--check` report go to stderr. A leading
 `~` (or a bare `~`) in a typed answer or a `--store`/positional path expands to
 your home directory.
-
-## Shell completions
-
-`skilldozer` ships dynamic completions for bash, zsh, and fish. Tag completion is
-not a static list: the shell calls `skilldozer --relative --all` at completion time,
-so it never goes stale as you add skills.
-
-The easiest way to load completions is the `completion` subcommand, which prints
-the script for your shell to eval. The binary embeds the completion scripts, so
-this works for `go install` users with no clone.
-
-**bash / zsh** — add to `~/.bashrc` or `~/.zshrc`:
-
-```bash
-eval "$(skilldozer completion)"
-```
-
-**fish** — add to `~/.config/fish/config.fish`:
-
-```bash
-skilldozer completion --shell fish | source
-```
-
-`--shell <bash|zsh|fish>` makes the eval deterministic; otherwise
-`skilldozer completion` auto-detects from `$SKILLDOZER_SHELL`, then `$SHELL`.
-
-Prefer to copy the file instead? The manual path below picks up edits to
-`completions/*` without a rebuild.
-
-**bash** (one of):
-
-```bash
-source /path/to/skilldozer/completions/skilldozer.bash
-cp completions/skilldozer.bash ~/.local/share/bash-completion/completions/skilldozer
-cp completions/skilldozer.bash /etc/bash_completion.d/skilldozer
-```
-
-**zsh** (one of):
-
-```bash
-cp completions/_skilldozer ~/.zsh/completions/_skilldozer
-cp completions/_skilldozer /usr/local/share/zsh/site-functions/_skilldozer
-```
-
-then ensure this is in your `.zshrc`:
-
-```bash
-autoload -U compinit && compinit
-```
-
-**fish**:
-
-```bash
-cp completions/skilldozer.fish ~/.config/fish/completions/skilldozer.fish
-```
-
-`install.sh` does not install completions automatically; copy the file you
-want as shown above.
 
 ## Usage
 
@@ -180,7 +122,7 @@ skilldozer --search reddit            # matches tag / name / description / keywo
 skilldozer --all
 
 # Validate every skill on disk
-skilldozer check
+skilldozer --check
 
 # Where is the resolved skills directory? (its discovery rule prints to stderr)
 skilldozer --path                        # → /…/skills (stderr: found via sibling of binary)
@@ -204,7 +146,7 @@ multiple tags are given, any unresolved tag causes nothing to be printed and
 exit 1, so `pi` never sees a partial result. The `--path`, `--list`, `--search`,
 and `--all` modes are mutually exclusive — combining any two exits 2, as does
 combining a tag with any of them (a tag resolves one path; those modes inspect
-the whole store). `--store` expects a value: `init --store` with nothing after
+the whole store). `--store` expects a value: `--init --store` with nothing after
 it exits 2 rather than guessing a store.
 
 `skilldozer --help` lists every flag.
@@ -236,14 +178,10 @@ Tag resolution tries, in order:
 So `skilldozer example`, `skilldozer writing/reddit`, `skilldozer reddit` (if unique), and
 `skilldozer foo-helper` (matching a frontmatter `name`) all resolve.
 
-**Reserved tag names.** `check` and `init` are subcommand names, so they never resolve as
-skill tags: `skilldozer check` runs validation and `skilldozer init` runs first-run setup.
-That is the standard CLI rule — a subcommand name takes precedence over a positional
-argument. A skill whose canonical tag collides (`skills/check/SKILL.md`, tag `check`) is
-still fully usable, just not via that one tag: it appears in `--list` and `--all`, and
-resolves by a nested path (`writing/check`), by its frontmatter `name`, or by a declared
-alias. To point `init` at a store directory literally named `check` or `init`, pass it with
-`--store` rather than as a positional argument.
+There are **no reserved tag names**: bare words are always skill tags, and every
+action is a `--flag` (§6.1). A skill named `check`, `init`, or `completions`
+resolves normally by its tag — use `--check`, `--init`, or `--completions` to
+run the action.
 
 ## Adding a skill
 
@@ -278,7 +216,7 @@ Body of the skill. This is what pi loads when you pass the path.
 When you are done, validate everything on disk:
 
 ```bash
-skilldozer check
+skilldozer --check
 ```
 
 Output:
@@ -294,7 +232,7 @@ OK    example (example)
 
 1. **`SKILLDOZER_SKILLS_DIR` env var** — override; if set and an existing dir,
    use it. Lets CI / tests / temporary redirects win without editing the config.
-2. **Config file `store`** — the primary, set by `skilldozer init`. The config
+2. **Config file `store`** — the primary, set by `skilldozer --init`. The config
    lives at `$XDG_CONFIG_HOME/skilldozer/config.yaml` (→
    `~/.config/skilldozer/config.yaml`); override the file path with
    `SKILLDOZER_CONFIG=<file>` (handy for tests / multiple profiles). Minimal
@@ -312,7 +250,7 @@ OK    example (example)
    would break it silently.
 4. **Walk up from `cwd`** — for `go run` / dev.
 5. **None** ⇒ unconfigured: skilldozer prints
-   `skilldozer is not configured; run \`skilldozer init\`` to stderr, writes
+   `skilldozer is not configured; run \`skilldozer --init\`` to stderr, writes
    nothing to stdout, and exits 1.
 
 `skilldozer --path` reports the winning directory on stdout and the matching rule
@@ -321,13 +259,90 @@ or `ancestor of cwd`. The stderr label matters when `SKILLDOZER_SKILLS_DIR` is
 typo'd: a bad value is silently ignored and discovery falls through to a lower
 rule, so the `--path` label is the only way to tell the env var was skipped.
 
+## Shell completions
+
+`skilldozer` ships dynamic completions for bash, zsh, and fish. Tag completion is
+not a static list: the shell calls `skilldozer --relative --all` at completion time,
+so it never goes stale as you add skills.
+
+The easiest way to load completions is the `--completions` flag, which prints
+the script for your shell to eval. The binary embeds the completion scripts, so
+this works for `go install` users with no clone.
+
+**bash / zsh** — add to `~/.bashrc` or `~/.zshrc`:
+
+```bash
+eval "$(skilldozer --completions)"
+```
+
+**fish** — add to `~/.config/fish/config.fish`:
+
+```bash
+skilldozer --completions --shell fish | source
+```
+
+`--shell <bash|zsh|fish>` makes the eval deterministic; otherwise
+`skilldozer --completions` auto-detects from `$SKILLDOZER_SHELL`, then `$SHELL`.
+
+Once loaded, completions are **skills-first and long-form-only**:
+
+- `skilldozer <tab>` lists your installed skill tags (the default, most-used
+  action) — never the help text or a command list. The list is recomputed from
+  `skilldozer --relative --all` on every keystroke, so a newly-dropped skill is
+  completable immediately.
+- `skilldozer -<tab>` lists the **long-form flags only** — `--all`, `--check`,
+  `--completions`, `--file`, `--help`, `--init`, `--list`, `--no-color`,
+  `--path`, `--relative`, `--search`, `--store`, `--version` — narrowed by what
+  you type after the dash. Short aliases (`-a`, `-l`, …) stay valid for typing
+  but are deliberately not advertised.
+- `skilldozer --init <tab>` and `skilldozer --store <tab>` offer directories
+  (the store to adopt); `skilldozer --search <tab>` offers nothing (free-text).
+
+This works because every action that is not a skill tag is a `--flag` —
+`--check`, `--init`, and `--completions` are flags, not bare subcommands — so the
+bare positional namespace belongs entirely to skill tags and a `<tab>` is
+unambiguous.
+
+Prefer to copy the file instead? The manual path below picks up edits to
+`completions/*` without a rebuild.
+
+**bash** (one of):
+
+```bash
+source /path/to/skilldozer/completions/skilldozer.bash
+cp completions/skilldozer.bash ~/.local/share/bash-completion/completions/skilldozer
+cp completions/skilldozer.bash /etc/bash_completion.d/skilldozer
+```
+
+**zsh** (one of):
+
+```bash
+cp completions/_skilldozer ~/.zsh/completions/_skilldozer
+cp completions/_skilldozer /usr/local/share/zsh/site-functions/_skilldozer
+```
+
+then ensure this is in your `.zshrc`:
+
+```bash
+autoload -U compinit && compinit
+```
+
+**fish**:
+
+```bash
+cp completions/skilldozer.fish ~/.config/fish/completions/skilldozer.fish
+```
+
+`install.sh` does not install completions automatically; copy the file you
+want as shown above.
+
 ## Constraints
 
 `skilldozer` is deliberately a thin path printer.
 
 - **No catalog index.** There is no `skills.json`, no manifest enumerating
   skills — the catalog is always walked from disk on each call. A *settings*
-  config file (the store location, written by `skilldozer init`) is expected and
+  config file (the store location, written by `skilldozer --init`) is expected and
   fine; the rule is only that catalog data already on disk is never duplicated
   into a sidecar.
 - **Never auto-discovered by pi.** The skills store does **not** live in any

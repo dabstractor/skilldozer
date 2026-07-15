@@ -11,7 +11,11 @@
 #
 # LOCKSTEP: the flag list below is frozen to `main.go parseArgs()`. If a future
 # task adds/renames a flag there, update this list — and the bash/fish files —
-# identically.
+# identically. There is no shared source of truth the shells can import.
+# Flags are long-form-only (decision 20): short aliases stay valid at runtime
+# but are not advertised. Updated for --check/--init/--completions (decision 19):
+# these were promoted from bare subcommands so the bare positional namespace
+# belongs to skill tags — a bare <tab> shows skills, never commands.
 _skilldozer() {
     local -a tags
     # Canonical relTags, one per line. ${(f)...} splits on newlines. Errors
@@ -19,41 +23,38 @@ _skilldozer() {
     tags=(${(f)"$(skilldozer --relative --all 2>/dev/null)"})
 
     local -a flags=(
-        '--version[Print the skilldozer version]'   '-v[Print the skilldozer version]'
-        '--help[Show this help message]'      '-h[Show this help message]'
-        '--path[Print the resolved skills directory]' '-p[Print the resolved skills directory]'
-        '--list[Human-readable catalog (TAG, NAME, DESCRIPTION)]' '-l[Human-readable catalog]'
-        '--all[Print every skill directory path, sorted by tag]' '-a[Print every skill dir path]'
-        '--file[Print the SKILL.md path instead of the directory]' '-f[Print the SKILL.md path]'
+        '--version[Print the skilldozer version]'
+        '--help[Show this help message]'
+        '--path[Print the resolved skills directory]'
+        '--list[Human-readable catalog (TAG, NAME, DESCRIPTION)]'
+        '--all[Print every skill directory path, sorted by tag]'
+        '--file[Print the SKILL.md path instead of the directory]'
         '--relative[Print paths relative to the skills directory]'
         '--no-color[Disable ANSI color]'
-        # `:query:` marks --search/-s as value-taking, so zsh routes the value
-        # slot away from $state (no tag completion after them). NO completion is
-        # offered for the search value (free-text query).
+        # `:query:` marks --search as value-taking, so zsh routes the value
+        # slot away from $state (no tag completion after it). NO completion is
+        # offered for the search value (free-text query). No short alias is
+        # advertised (decision 20: long-form-only).
         '--search[Substring search over tag/name/description/keywords]:query:'
-        '-s[Substring search over tag/name/description/keywords]:query:'
-        # `:directory:_files` routes --store's value slot to file/path completion
-        # (directories). No short form. (The OPPOSITE of --search: --store WANTS
-        # path completion; --search offers nothing.)
+        # `:directory:_files` routes --store's and --init's value slots to
+        # file/path completion (directories). (The OPPOSITE of --search:
+        # --store/--init WANT path completion; --search offers nothing.)
         '--store[Non-interactive store path for init]:directory:_files'
+        # Decision 19: check/init/completions promoted from bare subcommands to
+        # flags; decision 20: no short aliases advertised.
+        '--check[Validate every skill on disk]'
+        '--init[First-run setup: pick/create the skills store]:directory:_files'
+        '--completions[Emit the shell completion script for eval]'
     )
 
-    _arguments -C "$flags[@]" '1: :->first' '*: :->rest' && return 0
+    _arguments -C "$flags[@]" '*: :->args' && return 0
 
     case "$state" in
-        first)
-            # check AND init are offered ONLY as the first positional token.
-            compadd -- "$tags[@]" check init completion
-            ;;
-        rest)
-            # `check` AND `init` are exclusive (PRD §6.3: either+tags → exit 2).
-            # Once one is seen, suppress tags so completion never invites a
-            # guaranteed error.
-            if (( ${words[(I)check]} || ${words[(I)init]} || ${words[(I)completion]} )); then
-                _message 'subcommand takes no tag arguments'
-            else
-                compadd -- "$tags[@]"
-            fi
+        args)
+            # Positionals are ALWAYS skills (decision 19: no bare subcommands),
+            # and skills are never mutually exclusive — offer them on every
+            # positional <tab>, first or later.
+            compadd -- "$tags[@]"
             ;;
     esac
 }
