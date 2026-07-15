@@ -1,0 +1,14 @@
+h1.0 Bug Fix Requirements
+ h2.0 Overview
+ h2.1 Critical Issues (Must Fix)
+ h2.2 Major Issues (Should Fix)
+  h3.0 Issue 1: --shell value completion offers skill tags instead of bash zsh fish (all three shells)
+  h3.1 Issue 2: A configured store whose directory has vanished silently falls through to a different store (wrong skills loaded)
+ h2.3 Minor Issues (Nice to Fix)
+  h3.2 Issue 3: Value-taking flags missing their value are handled inconsistently; --search/--shell print help (exit 0) while --store exits 2
+  h3.3 Issue 4: POSIX -- end-of-options separator is rejected as an unknown flag
+  h3.4 Issue 5: README "version is the git-describe value" is only true for the install.sh build
+ h2.4 Testing Summary
+  h3.5 Reproducibility notes
+---
+code:5 para:33 list:5 quote:1
