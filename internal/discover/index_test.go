@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // NOTE: this file is white-box `package discover`, so it shares scope with
@@ -254,5 +255,153 @@ func TestIndexRelativeInputDirStillAbsolute(t *testing.T) {
 	}
 	if got[0].RelTag != "example" {
 		t.Errorf("RelTag=%q; want example", got[0].RelTag)
+	}
+}
+
+// --- symlink-following (PRD §7.1: the walk now follows linked directories) ---
+
+// mustSymlink creates target->link and skips the test if the platform/filesystem
+// can't create symlinks (mirrors skillsdir_test.go's approach).
+func mustSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not supported on this platform: %v", err)
+	}
+}
+
+// A skill dir living OUTSIDE the skills root, linked in by a symlink, is
+// discovered. RelTag/Dir/SourceFile are reported under the LINK NAME (what the
+// user wrote), not the resolved target, and the SKILL.md is readable through it.
+func TestIndexFollowsSymlinkedSkillDir(t *testing.T) {
+	root := t.TempDir()
+	target := t.TempDir()
+	os.WriteFile(filepath.Join(target, "SKILL.md"),
+		[]byte("---\nname: pooled\ndescription: d\n---\nbody\n"), 0o644)
+	link := filepath.Join(root, "agent-browser-pool")
+	mustSymlink(t, target, link)
+
+	got, err := Index(root)
+	if err != nil {
+		t.Fatalf("err=%v; want nil", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len=%d; want 1 (symlinked skill dir must be discovered), got=%v", len(got), got)
+	}
+	s := got[0]
+	if s.RelTag != "agent-browser-pool" {
+		t.Errorf("RelTag=%q; want agent-browser-pool (reported under the link name)", s.RelTag)
+	}
+	wantDir := filepath.Join(root, "agent-browser-pool")
+	if s.Dir != wantDir {
+		t.Errorf("Dir=%q; want %q (display path THROUGH the symlink)", s.Dir, wantDir)
+	}
+	if s.SourceFile != filepath.Join(wantDir, "SKILL.md") {
+		t.Errorf("SourceFile=%q; want %q", s.SourceFile, filepath.Join(wantDir, "SKILL.md"))
+	}
+	if _, err := os.Stat(s.SourceFile); err != nil {
+		t.Errorf("SourceFile not readable through symlink: %v", err)
+	}
+	if s.Name != "pooled" || !s.HasFM {
+		t.Errorf("frontmatter not parsed through symlink: Name=%q HasFM=%v", s.Name, s.HasFM)
+	}
+}
+
+// A linked-in directory that itself contains NESTED skills is fully walked, with
+// relTags reported under the link prefix (vendored/...), not the resolved target.
+func TestIndexSymlinkedNestedTree(t *testing.T) {
+	target := t.TempDir()
+	for relTag, body := range map[string]string{
+		"writing":        "---\nname: writing\ndescription: d\n---\n",
+		"writing/reddit": "---\nname: reddit\ndescription: d\n---\n",
+	} {
+		dir := filepath.Join(target, filepath.FromSlash(relTag))
+		os.MkdirAll(dir, 0o755)
+		os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644)
+	}
+	root := t.TempDir()
+	mustSymlink(t, target, filepath.Join(root, "vendored"))
+
+	got, _ := Index(root)
+	var tags []string
+	for _, s := range got {
+		tags = append(tags, s.RelTag)
+	}
+	want := []string{"vendored/writing", "vendored/writing/reddit"}
+	if !strEq(tags, want) {
+		t.Fatalf("RelTags=%v; want %v (nested skills reported under the link prefix)", tags, want)
+	}
+}
+
+// Symlink cycles MUST terminate. Two cycles are planted: a link back at root, and
+// a link from a subdir back at that subdir. A walk without a cycle guard would
+// never return. The result is exactly the two real skills (no duplicates).
+func TestIndexSymlinkCycleBroken(t *testing.T) {
+	root := makeTree(t, map[string]string{
+		"real": "---\nname: real\ndescription: d\n---\n",
+	})
+	mustSymlink(t, root, filepath.Join(root, "loop")) // -> ancestor (root)
+
+	sub := filepath.Join(root, "sub")
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "SKILL.md"), []byte("---\nname: sub\ndescription: d\n---\n"), 0o644)
+	mustSymlink(t, sub, filepath.Join(sub, "inner")) // -> ancestor (sub)
+
+	// Guard against a regression that would hang the suite: if the cycle isn't
+	// broken, fail fast instead of waiting for `go test`'s 10m timeout.
+	done := make(chan struct{})
+	go func() { Index(root); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Index did not return within 5s; symlink cycle not broken (infinite loop)")
+	}
+
+	got, err := Index(root)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	var tags []string
+	for _, s := range got {
+		tags = append(tags, s.RelTag)
+	}
+	if !strEq(tags, []string{"real", "sub"}) {
+		t.Errorf("RelTags=%v; want [real sub] (cycle links must not duplicate or hang)", tags)
+	}
+}
+
+// A broken (dangling) symlink is skipped silently — not an error, not a skill.
+func TestIndexBrokenSymlinkSkipped(t *testing.T) {
+	root := makeTree(t, map[string]string{
+		"good": "---\nname: good\ndescription: d\n---\n",
+	})
+	mustSymlink(t, filepath.Join(t.TempDir(), "nope"), filepath.Join(root, "dangling"))
+
+	got, err := Index(root)
+	if err != nil {
+		t.Fatalf("err=%v; want nil (broken symlink must be skipped, not an error)", err)
+	}
+	if len(got) != 1 || got[0].RelTag != "good" {
+		t.Fatalf("got=%v; want exactly [good] (broken symlink ignored)", got)
+	}
+}
+
+// A skills dir that is ITSELF a symlink to a directory still works; RelTag is
+// relative to the link path the user passed (not the resolved target).
+func TestIndexSymlinkedRoot(t *testing.T) {
+	real := makeTree(t, map[string]string{
+		"example": "---\nname: example\ndescription: d\n---\n",
+	})
+	link := filepath.Join(filepath.Dir(real), "skills-link")
+	mustSymlink(t, real, link)
+
+	got, err := Index(link)
+	if err != nil {
+		t.Fatalf("err=%v; want nil (a skills dir that is itself a symlink must work)", err)
+	}
+	if len(got) != 1 || got[0].RelTag != "example" {
+		t.Fatalf("got=%v; want [example] through a symlinked root", got)
+	}
+	if !strings.HasPrefix(got[0].Dir, link) {
+		t.Errorf("Dir=%q; want it under the symlink root %q", got[0].Dir, link)
 	}
 }

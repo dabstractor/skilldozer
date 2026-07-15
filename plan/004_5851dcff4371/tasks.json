@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Subcommands → flags + skills-first completions",
-      "status": "Planned",
+      "status": "Complete",
       "description": "Convert the three bare-word reserved subcommands (check, init, completion) into long-only --flags (--check, --init, --completions) so the bare positional namespace belongs entirely to skill tags (decision 19), then rewrite the three shell completion files to be skills-first and long-form-only (decision 20). The existing internal/ subsystems (discover, resolve, check, config, search, ui, skillsdir) are untouched except for one error-message string.",
       "milestones": [
         {
@@ -141,7 +141,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "User-facing surfaces: completions rewrite + README sync",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Rewrite the three shell completion files to be skills-first and long-form-only (decision 20), then sync README.md to reflect the new --flag CLI contract. M2 depends on M1 via the §14.4 lockstep invariant (completion files are frozen to parseArgs).",
           "tasks": [
             {
@@ -198,14 +198,14 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "Sync changeset-level documentation",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Mode B changeset-level documentation: update README.md to reflect the new --flag CLI contract. This task depends on ALL implementing subtasks (it summarizes the entire changeset). Update every command reference, remove the now-obsolete 'Reserved tag names' section, and document the skills-first completions behavior.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T2.S1",
                   "title": "Update README.md: command refs, remove Reserved section, completions section",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",

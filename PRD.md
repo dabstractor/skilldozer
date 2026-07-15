@@ -153,7 +153,7 @@ Binary name: **`skilldozer`**. **Every action that is not a skill tag is a `--fl
 ### 7.1 Discovery
 
 1. Locate the skills dir (§8).
-2. Walk it recursively. A **skill** = any directory that directly contains a `SKILL.md`. (Nested skills count: `skills/writing/reddit/SKILL.md` is a skill.)
+2. Walk it recursively. A **skill** = any directory that directly contains a `SKILL.md`. (Nested skills count: `skills/writing/reddit/SKILL.md` is a skill.) Symlinked directories **are followed** — a skill reachable only through a symlink is discovered and reported under its on-disk link name (not the resolved target). Cycles are broken via a visited set of resolved (canonical) paths, so a link that points back at an ancestor terminates the walk instead of looping forever.
 3. For each skill, parse frontmatter (§7.3) and capture:
    - `dir` — absolute path of the skill directory.
    - `relTag` — path of the skill dir **relative to** the skills dir, with OS separators normalized to `/` (e.g. `writing/reddit`). **This is the canonical tag.**
