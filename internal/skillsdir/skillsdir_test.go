@@ -534,6 +534,48 @@ func TestErrNotFoundMessageHasFix(t *testing.T) {
 	}
 }
 
+// Find: a present config whose `store:` names a non-existent dir makes Find() return
+// a wrapped ErrConfiguredStoreMissing (NOT fall through to sibling/walk-up). §6.4:
+// "configured but the dir vanished" -> reason + fix, exit 1, nothing on stdout.
+func TestFindErrorsOnVanishedConfiguredStore(t *testing.T) {
+	t.Setenv(envVar, "") // neutralize SKILLDOZER_SKILLS_DIR (env must NOT override) — GOTCHA #7
+	t.Chdir(t.TempDir()) // hermetic: no walk-up ancestor skills/ (moot — Find errors before walk-up)
+	store := filepath.Join(t.TempDir(), "no-such-store")
+	writeCfg(t, "store: "+store+"\n") // present config, vanished store
+	dir, src, err := Find()
+	if !errors.Is(err, ErrConfiguredStoreMissing) {
+		t.Fatalf("Find() vanished store: err=%v; want ErrConfiguredStoreMissing", err)
+	}
+	if dir != "" || src != 0 {
+		t.Errorf("Find() vanished store: dir=%q src=%v; want \"\" and 0", dir, src)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, store) {
+		t.Errorf("Find() vanished store: message %q missing the configured path %q", msg, store)
+	}
+	if !strings.Contains(msg, "skilldozer --init") {
+		t.Errorf("Find() vanished store: message %q missing the fix 'skilldozer --init'", msg)
+	}
+}
+
+// Find (decisions D3): SKILLDOZER_SKILLS_DIR (priority 1) wins over a vanished config
+// store (priority 2) — findEnv runs first, findConfig is never called, no error.
+func TestFindEnvOverridesVanishedStore(t *testing.T) {
+	envStore := t.TempDir() // an EXISTING dir for the env override
+	t.Setenv(envVar, envStore)
+	writeCfg(t, "store: "+filepath.Join(t.TempDir(), "no-such-store")+"\n") // present config, vanished store
+	got, src, err := Find()
+	if err != nil {
+		t.Fatalf("Find() env-override: err=%v; want nil (env beats vanished config)", err)
+	}
+	if src != SourceEnv {
+		t.Errorf("Find() env-override: src=%v; want SourceEnv", src)
+	}
+	if want := filepath.Clean(envStore); got != want {
+		t.Errorf("Find() env-override: dir=%q; want %q", got, want)
+	}
+}
+
 // --- findConfig (PRD §8.3 rule 2 / §8.1) ---
 
 // writeCfg writes content to a temp config.yaml, sets SKILLDOZER_CONFIG to it, and
@@ -555,7 +597,7 @@ func writeCfg(t *testing.T, content string) (cfgPath, cfgDir string) {
 func TestFindConfigHit(t *testing.T) {
 	store := t.TempDir() // already an existing, absolute dir
 	writeCfg(t, "store: "+store+"\n")
-	got, src, found := findConfig()
+	got, src, found, _ := findConfig()
 	if !found {
 		t.Fatal("findConfig existing store: found=false; want true")
 	}
@@ -570,7 +612,7 @@ func TestFindConfigHit(t *testing.T) {
 // Rule 2 miss: config file does not exist -> fall through (never a hard error).
 func TestFindConfigMissingFile(t *testing.T) {
 	t.Setenv("SKILLDOZER_CONFIG", filepath.Join(t.TempDir(), "does-not-exist.yaml"))
-	if dir, src, found := findConfig(); found {
+	if dir, src, found, _ := findConfig(); found {
 		t.Errorf("findConfig missing file: got found=true dir=%q src=%v; want false", dir, src)
 	}
 }
@@ -578,16 +620,23 @@ func TestFindConfigMissingFile(t *testing.T) {
 // Rule 2 miss: config file has no `store` key -> fall through.
 func TestFindConfigMissingStoreKey(t *testing.T) {
 	writeCfg(t, "foo: bar\n") // no `store:` key
-	if dir, src, found := findConfig(); found {
+	if dir, src, found, _ := findConfig(); found {
 		t.Errorf("findConfig no store key: got found=true dir=%q src=%v; want false", dir, src)
 	}
 }
 
-// Rule 2 miss: `store` names a dir that does not exist -> fall through.
-func TestFindConfigStoreDirAbsent(t *testing.T) {
-	writeCfg(t, "store: "+filepath.Join(t.TempDir(), "no-such-store")+"\n")
-	if dir, src, found := findConfig(); found {
-		t.Errorf("findConfig absent store dir: got found=true dir=%q src=%v; want false", dir, src)
+// Rule 2 miss: `store` names a dir that does not exist -> findConfig reports the
+// vanished store (§6.4) so Find() can error loudly instead of falling through to
+// an unrelated sibling/walk-up store.
+func TestFindConfigStoreVanished(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "no-such-store")
+	writeCfg(t, "store: "+store+"\n")
+	dir, src, found, vanished := findConfig()
+	if found {
+		t.Errorf("findConfig vanished store: got found=true dir=%q src=%v; want false", dir, src)
+	}
+	if vanished != store {
+		t.Errorf("findConfig vanished store: vanished=%q; want %q (the configured path)", vanished, store)
 	}
 }
 
@@ -597,7 +646,7 @@ func TestFindConfigStoreDirAbsent(t *testing.T) {
 // yet configured' and falls through to §8.3 rules 3-5 — never a hard error."
 func TestFindConfigMalformedYAML(t *testing.T) {
 	writeCfg(t, "store: [unclosed\n") // syntactically broken YAML -> Load hard-errors
-	if dir, src, found := findConfig(); found {
+	if dir, src, found, _ := findConfig(); found {
 		t.Errorf("findConfig malformed YAML: got found=true dir=%q src=%v; want false (fall through, not hard error)", dir, src)
 	}
 }
@@ -611,7 +660,7 @@ func TestFindConfigRelativeStoreResolvedAgainstConfigDir(t *testing.T) {
 	if err := os.Mkdir(store, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", store, err)
 	}
-	got, src, found := findConfig()
+	got, src, found, _ := findConfig()
 	if !found {
 		t.Fatal("findConfig relative store: found=false; want true")
 	}

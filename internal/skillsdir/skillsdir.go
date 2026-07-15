@@ -20,6 +20,7 @@ package skillsdir
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -101,19 +102,24 @@ func findEnv() (dir string, src Source, found bool) {
 // store may be relative to the config file), NOT against cwd. The resolved store must
 // name an existing directory or the rule misses.
 //
-// Returns (absStore, SourceConfig, true) on a hit; ("", 0, false) otherwise so Find()
-// can fall through to the sibling rule. Never errors (locked per-rule shape).
-func findConfig() (dir string, src Source, found bool) {
+// Returns (absStore, SourceConfig, true, "") on a hit. Returns ("", 0, false, "") on the
+// genuine fall-through paths (no config file / unreadable / no `store` key) so Find() can
+// fall through to the sibling rule — PRD §8.1: a missing/unreadable config NEVER hard-errors.
+// Returns ("", 0, false, vanishedStore) ONLY when the config file is present with a `store:`
+// key whose resolved dir does not exist (§6.4 "configured but the dir vanished") — Find()
+// turns that into a wrapped ErrConfiguredStoreMissing instead of falling through. Never
+// errors directly (locked per-rule shape); the vanishedStore string is the signal Find() uses.
+func findConfig() (dir string, src Source, found bool, vanishedStore string) {
 	p, err := config.Path()
 	if err != nil {
-		return "", 0, false // no bootstrap path (e.g. relative $XDG_CONFIG_HOME) -> fall through
+		return "", 0, false, "" // no bootstrap path (e.g. relative $XDG_CONFIG_HOME) -> fall through
 	}
 	f, err := config.Load(p)
 	if err != nil {
-		return "", 0, false // missing/unreadable/malformed -> "not yet configured" -> fall through
+		return "", 0, false, "" // missing/unreadable/malformed -> "not yet configured" -> fall through
 	}
 	if f.Store == "" {
-		return "", 0, false // no `store` key -> fall through
+		return "", 0, false, "" // no `store` key -> fall through
 	}
 	var store string
 	if filepath.IsAbs(f.Store) {
@@ -123,9 +129,9 @@ func findConfig() (dir string, src Source, found bool) {
 	}
 	info, err := os.Stat(store)
 	if err != nil || !info.IsDir() {
-		return "", 0, false // store path is not an existing dir -> fall through
+		return "", 0, false, store // store resolved but vanished -> Find() errors (§6.4), do NOT fall through
 	}
-	return store, SourceConfig, true
+	return store, SourceConfig, true, ""
 }
 
 // findSibling implements PRD §8 rule 2 — locate <repoDir>/skills next to the
@@ -274,6 +280,14 @@ func findWalkUp() (dir string, src Source, found bool) {
 // stderr and exits 1. Print it verbatim (err.Error()); do not wrap or prefix it.
 var ErrNotFound = errors.New("skilldozer is not configured; run `skilldozer --init`")
 
+// ErrConfiguredStoreMissing is returned by Find when the config file is present and
+// names a `store:` directory that does NOT exist on disk (§6.4: "configured but the
+// dir vanished"). Unlike a missing config file (§8.1 fall-through), this is a loud
+// error so `pi --skill "$(skilldozer x)"` fails instead of silently loading an
+// unrelated sibling/walk-up store. Find wraps it via fmt.Errorf("%w: ...", ...) so
+// callers can errors.Is(err, ErrConfiguredStoreMissing). Print verbatim to stderr.
+var ErrConfiguredStoreMissing = errors.New("configured skills store directory does not exist")
+
 // Find locates the skills directory per PRD §8.3 priority order (first hit wins):
 //
 //  1. SKILLDOZER_SKILLS_DIR env var (SourceEnv).
@@ -282,6 +296,11 @@ var ErrNotFound = errors.New("skilldozer is not configured; run `skilldozer --in
 //  4. Walk up from cwd (SourceWalkUp).
 //  5. None ⇒ unconfigured: returns ErrNotFound.
 //
+// NOTE (§6.4): if the config file is present with a `store:` naming a non-existent dir,
+// Find returns a wrapped ErrConfiguredStoreMissing (configuring-then-vanished) instead of
+// falling through — so a vanished store never silently resolves tags from an unrelated
+// sibling/walk-up store. A genuinely missing/unreadable config still falls through (§8.1).
+//
 // The first rule to hit wins and Find returns (absDir, src, nil). If all miss it
 // returns ("", 0, ErrNotFound); the caller (main) prints the error to stderr and
 // exits 1.
@@ -289,8 +308,15 @@ func Find() (dir string, src Source, err error) {
 	if d, s, ok := findEnv(); ok {
 		return d, s, nil
 	}
-	if d, s, ok := findConfig(); ok { // PRD §8.3 priority #2
+	d, s, ok, vanished := findConfig() // PRD §8.3 priority #2
+	if ok {
 		return d, s, nil
+	}
+	if vanished != "" {
+		// Config is present with a `store:` key, but the named dir does not exist (§6.4:
+		// "configured but the dir vanished"). This is NOT "unconfigured" — falling through
+		// to sibling/walk-up would silently load an UNRELATED store, so fail loudly instead.
+		return "", 0, fmt.Errorf("%w: configured store %q does not exist; run `skilldozer --init` or recreate the directory", ErrConfiguredStoreMissing, vanished)
 	}
 	if d, s, ok := findSibling(); ok {
 		return d, s, nil
