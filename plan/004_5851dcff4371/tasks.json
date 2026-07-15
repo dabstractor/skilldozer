@@ -148,14 +148,14 @@
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "Rewrite the three completion files (skills-first + long-form-only)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Rewrite completions/skilldozer.bash, completions/_skilldozer (zsh), and completions/skilldozer.fish to: (a) remove bare subcommand offers so a bare <tab> yields skills only, (b) remove short-form flag offers (-v -h -p -l -a -f -s) so flags are long-form-only, (c) add --check/--init/--completions to each file's flag set, (d) keep tag completion (the skilldozer --relative --all 2>/dev/null probe) byte-identical. A rebuild is required for --completions to emit the new bytes (§14.6 lockstep).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T1.S1",
                   "title": "Rewrite completions/skilldozer.bash (skills-first, long-form-only)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S1"
@@ -175,7 +175,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T1.S2",
                   "title": "Rewrite completions/_skilldozer (zsh) + completions/skilldozer.fish",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S1",

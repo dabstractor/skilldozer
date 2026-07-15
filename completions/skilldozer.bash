@@ -11,6 +11,10 @@
 # LOCKSTEP: the flag set below is frozen to `main.go parseArgs()`. If a future
 # task adds/renames a flag there, update this list — and the zsh/fish files —
 # identically. There is no shared source of truth the shells can import.
+# Flags are long-form-only (decision 20): short aliases stay valid at runtime
+# but are not advertised. Updated for --check/--init/--completions (decision 19):
+# these were promoted from bare subcommands so the bare positional namespace
+# belongs to skill tags — a bare <tab> shows skills, never commands.
 _skilldozer_completion() {
     local cur prev words cword
     # _init_completion (from the bash-completion package) sets cur/prev/words/cword.
@@ -27,43 +31,32 @@ _skilldozer_completion() {
     }
 
     # Value-taking flags: route the value slot away from tag completion.
-    #   --search/-s  -> free-text query  -> offer NOTHING (return 0 with empty COMPREPLY).
-    #   --store      -> directory value  -> complete DIRECTORIES via compgen -d.
-    # (--store WANTS path completion, unlike --search's free-text -> nothing.)
+    #   --search        -> free-text query  -> offer NOTHING (return 0 with empty COMPREPLY).
+    #   --store/--init  -> directory value  -> complete DIRECTORIES via compgen -d.
+    # (--store/--init WANT path completion, unlike --search's free-text -> nothing.)
     case "$prev" in
-        --search|-s) return 0 ;;
-        --store) COMPREPLY=($(compgen -d -- "$cur")); return 0 ;;
+        --search) return 0 ;;
+        --store|--init) COMPREPLY=($(compgen -d -- "$cur")); return 0 ;;
     esac
 
-    # Flag completion when the current token starts with '-'.
+    # Flag completion when the current token starts with '-' (long-form only — decision 20).
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W \
-            "--version -v --help -h --path -p --list -l --all -a --file -f --relative --no-color --search -s --store" \
+            "--version --help --path --list --all --file --relative --no-color --search --store --check --init --completions" \
             -- "$cur"))
         return 0
     fi
 
-    # Walk earlier words: `check` AND `init` are EXCLUSIVE subcommands (PRD §6.3 —
-    # either +tags → exit 2), so once one appears, offer nothing further. Track
-    # whether any non-flag positional was seen so they are only ever offered
-    # as the FIRST positional token.
-    local i have_pos=0
-    for ((i=1; i<cword; i++)); do
-        [[ "${words[i]}" == "check" || "${words[i]}" == "init" || "${words[i]}" == "completion" ]] && return 0
-        [[ "${words[i]}" == -* ]] && continue
-        have_pos=1
-    done
-
     # Tags straight from the binary (canonical relTags, one per line). Errors
     # swallowed: a missing/broken skilldozer degrades to "no tags" instead of spewing
-    # into the completion menu.
-    local tags cands
+    # into the completion menu. Positionals are ALWAYS skills (decision 19: no bare
+    # subcommands), and skills are never mutually exclusive — offer them on every
+    # positional <tab>, first or later.
+    local tags
     tags=$(skilldozer --relative --all 2>/dev/null)
-    cands="$tags"
-    (( have_pos == 0 )) && cands="$cands check init completion"
     # SC2207 (mapfile preferred) is acceptable here: tags and flags never
     # contain spaces, so word-splitting is safe.
-    COMPREPLY=($(compgen -W "$cands" -- "$cur"))
+    COMPREPLY=($(compgen -W "$tags" -- "$cur"))
     return 0
 }
 complete -F _skilldozer_completion skilldozer
