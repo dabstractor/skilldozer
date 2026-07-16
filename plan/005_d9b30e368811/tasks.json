@@ -4,14 +4,14 @@
       "type": "Phase",
       "id": "P1",
       "title": "List every match on the first Tab (§14.7)",
-      "status": "Ready",
+      "status": "Complete",
       "description": "Implement PRD §14.7 (new) + Decision 22 + the §14.1 rule-2 cross-reference: when the token being completed matches two or more candidates (skill tags OR long-form flags), the completion must surface the full filtered candidate set as visible hints on the FIRST Tab — never silently halt at the longest common prefix. The change is confined to the completion EMIT layer: bash and zsh emitted scripts set a session-global list-ambiguous-matches option (disclosed + opt-out-able); fish already lists by default. No flags are added/removed/renamed (§14.4 lockstep + usageText NOT triggered). Build on session 004's Complete+green completion machinery.",
       "milestones": [
         {
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Emitted scripts set the list-ambiguous-matches option (disclosed + opt-out)",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Single cohesive milestone. The §14.7 fix has two halves: (1) offer every match — already true, lock it, do not change it; (2) make the shell SHOW them on the first tab — the fix this milestone adds, via a session-global option set inside the emitted scripts. Three surfaces change (bash on-disk==emitted file, zsh derived eval registration const, README disclosure) plus byte-level test locks. T1 is the code; T2 is the test locks; T3 is the changeset-level README doc (Mode B) that runs last.",
           "tasks": [
             {
@@ -86,14 +86,14 @@
               "type": "Task",
               "id": "P1.M1.T3",
               "title": "Sync changeset-level documentation (README §14.7 disclosure)",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Mode B changeset-level documentation: the README disclosure only makes sense once BOTH emitted scripts (bash + zsh) carry the option, so it runs last and depends on the implementing subtasks. It discloses (per §14.7 / §15) that the emitted script sets a session-global list-ambiguous-matches option, names the option per shell, notes it affects every command in that shell, and gives the opt-out one-liners.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T3.S1",
                   "title": "README: disclose the option set + opt-out one-liners",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",

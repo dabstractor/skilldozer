@@ -333,6 +333,30 @@ This works because every action that is not a skill tag is a `--flag` —
 bare positional namespace belongs entirely to skill tags and a `<tab>` is
 unambiguous.
 
+The emitted script also sets a shell option so that when a prefix matches two or
+more skills or flags, **every** match lists on the first `<tab>` instead of the
+shell freezing at the common prefix. Because the store has no index, completion
+is the main way to discover skills — hiding candidates would defeat that.
+
+This is a **session-global** option: it changes tab-completion listing for *every*
+command in that shell, not just `skilldozer`, and it is set only when you load
+skilldozer's completions (via the `eval`/`source` lines above). The option each
+shell sets:
+
+- **bash** — `show-all-if-ambiguous` (set on)
+- **zsh** — `NO_LIST_AMBIGUOUS` (set on)
+- **fish** — lists all matches by default; no option is set
+
+Prefer your shell's stock behavior? Restore the default after loading completions:
+
+```bash
+# bash — list on the second Tab again
+bind 'set show-all-if-ambiguous off'
+
+# zsh — list only at the exact ambiguous point again
+setopt LIST_AMBIGUOUS
+```
+
 Prefer to copy the file instead? The manual path below picks up edits to
 `completions/*` without a rebuild.
 
