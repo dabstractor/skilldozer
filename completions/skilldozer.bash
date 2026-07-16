@@ -65,3 +65,21 @@ _skilldozer_completion() {
     return 0
 }
 complete -F _skilldozer_completion skilldozer
+
+# --- §14.7 listing behavior (decision 22) -------------------------------------
+# skilldozer wants every ambiguous match listed on the FIRST Tab — a manifest-free
+# store (PRD §2) makes completion the primary discovery path, so candidates hidden
+# behind a silent common-prefix halt are a UX defect. bash defaults to
+# show-all-if-ambiguous OFF: the first Tab completes the common prefix and beeps,
+# and the full list appears only on the second Tab.
+#
+# The line below sets show-all-if-ambiguous ON so all prefix matches list on the
+# first Tab. This is a READLINE SESSION-GLOBAL option: it changes listing for EVERY
+# command in this shell, not just skilldozer (there is no per-command scope). The
+# `[[ $- == *i* ]] &&` guard keeps this quiet when the file is sourced
+# non-interactively (e.g. an eval test harness): `bind` in a non-interactive shell
+# prints a warning, which the guard silences. Completions only matter interactively,
+# so the option still applies where it counts.
+[[ $- == *i* ]] && bind 'set show-all-if-ambiguous on'
+# Opt-out — restore bash's stock (second-Tab) listing:
+#   bind 'set show-all-if-ambiguous off'
