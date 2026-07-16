@@ -349,7 +349,25 @@ func parseArgs(args []string) config {
 			// follows), record storeMissingValue so run() rejects with exit 2
 			// (P1.M1.T2.S2) instead of silently no-op'ing into destructive auto-detect
 			// init when an `init` token already set c.init (Issue 2).
-			if i+1 < len(args) {
+			//
+			// Dashed-follower guard: a following token starting with '-' is NOT
+			// consumed as the value (mirrors --init). --store is DESTRUCTIVE (mkdir -p
+			// + config.Save), so a plausible typo like `--store --check` (intending
+			// two flags) must not silently mutate state by interpreting `--check` as
+			// the directory. Leaving it for its own case lets exclusivityError reject
+			// the combination with exit 2. (`--search`'s greedy consume is
+			// intentional — PRD §6.1 allows `--search -x` — but --store/--link are
+			// not query-like and carry data-mutation risk.)
+			//
+			// `--store <dir>` requires a value (unlike `--init [<dir>]` where the dir is
+			// optional). So a dashed follower is a MISSING VALUE: storeMissingValue is
+			// set and run() exits 2 with "--store requires a value" BEFORE any init
+			// dispatch (so no config is written, no dir created). This mirrors bare
+			// `--store` (no follower at all) and is fully non-destructive. For a MODE
+			// follower (e.g. `--store --check`) the exit-2 missing-value error fires
+			// before exclusivityError, which is fine — both are exit 2 and the
+			// missing-value message is the more actionable diagnosis.
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				c.init = true
 				c.initStore = args[i+1]
 				i++
@@ -389,7 +407,21 @@ func parseArgs(args []string) config {
 			// form. If --link is the LAST token (no value follows), record linkMissingValue so run()
 			// exits 2 with "--link requires a path to a skill directory" (mirrors --store/--search,
 			// Issue 3, D4). link stays false on the no-value path (no value consumed).
-			if i+1 < len(args) {
+			//
+			// Dashed-follower guard: a following token starting with '-' is NOT consumed as
+			// the target (mirrors --init/--store). --link mutates the store (creates a symlink
+			// under <store>/<name>), so a plausible typo like `--link --check` (intending two
+			// flags) must not be interpreted with `--check` as the link target. Leaving it for
+			// its own case lets exclusivityError reject the combination with exit 2.
+			//
+			// Unlike --init/--store, `--link` has NO cwd-auto-detect fallback: an empty
+			// target would silently link the cwd (runLink Abs'es "" to cwd). So a dashed
+			// follower is treated as a MISSING VALUE (linkMissingValue), not auto-detect.
+			// run() checks linkMissingValue (exit 2, "--link requires a path…") BEFORE
+			// exclusivityError, so every dashed follower — whether a MODE flag
+			// (--check/--list/…) or a MODIFIER (--relative/--file/--no-color) — exits 2
+			// safely with the missing-value message and creates no cwd symlink.
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				c.link = true
 				c.linkTarget = args[i+1]
 				i++

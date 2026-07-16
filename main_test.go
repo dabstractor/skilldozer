@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -3203,6 +3204,44 @@ func TestRunCompletionBashListsAmbiguous(t *testing.T) {
 	}
 }
 
+// Issue 2 (validation report 2025-07-16): the §14.7 listing-option line must not
+// make `source`/`eval` of the bash completion return exit 1 in a NON-interactive
+// shell. The `[[ $- == *i* ]] && bind ...` guard short-circuits to false (exit 1)
+// when $- has no 'i', which would abort a `.bashrc` under `set -e` or break
+// `source ... && cmd` one-liners. The `|| true` (or equivalent brace group) keeps
+// the source/eval rc at 0 while still guarding `bind`. This locks both the on-disk
+// file AND the embedded bytes (bash is emitted verbatim).
+func TestRunCompletionBashSourceExitCodeNonInteractive(t *testing.T) {
+	onDisk, err := os.ReadFile("completions/skilldozer.bash")
+	if err != nil {
+		t.Fatalf("os.ReadFile(completions/skilldozer.bash): %v", err)
+	}
+	scripts := []struct{ name, body string }{
+		{"on-disk", string(onDisk)},
+	}
+	// Also lock the embedded bytes (what `eval "$(skilldozer --completions)"` runs).
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--completions", "--shell", "bash"}, &out, &errOut); code != 0 {
+		t.Fatalf("run(--completions --shell bash): code=%d; want 0", code)
+	}
+	scripts = append(scripts, struct{ name, body string }{"embedded", out.String()})
+
+	for _, s := range scripts {
+		// Run the script body in a NON-interactive bash and capture the source's rc.
+		// Without the `|| true` guard the `[[ $- == *i* ]] && bind ...` line
+		// short-circuits to false, making source return exit 1.
+		cmd := exec.Command("bash", "-c", "source /dev/stdin; echo rc=$?")
+		cmd.Stdin = strings.NewReader(s.body)
+		runOut, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("bash source (%s) failed: %v; output:\n%s", s.name, err, runOut)
+		}
+		if !strings.Contains(string(runOut), "rc=0") {
+			t.Errorf("non-interactive source of (%s) bash completion did not return rc=0; output:\n%s", s.name, runOut)
+		}
+	}
+}
+
 // TestRunCompletionFishScript locks the §13 acceptance: `completion --shell fish`
 // → exit 0, stdout contains the fish-script marker.
 func TestRunCompletionFishScript(t *testing.T) {
@@ -3779,4 +3818,167 @@ func TestRunLinkAbsolutizesRelativeTarget(t *testing.T) {
 		t.Errorf("symlink target=%q; want %q (relative input must be absolutized)", target, ext)
 	}
 	_ = errOut
+}
+
+// --- Issue 1 (validation report 2025-07-16): dashed-follower guard for --store/--link ---
+//
+// --store and --link are DESTRUCTIVE (mkdir -p + config.Save / symlink creation).
+// A dashed follower (e.g. `--store --check`, intending two flags) must NOT be
+// consumed as the value and silently mutate state. Mirrors --init's existing
+// dashed-follower guard: a token starting with '-' is left for its own case and
+// the value-taking flag records its missing-value signal (exit 2, non-destructive).
+
+// parseArgs: `--store --check` does NOT consume `--check` as the store path.
+// storeMissingValue is set (no valid value); c.init stays false; no stray tag.
+func TestParseArgsStoreDashedFollowerNotConsumed(t *testing.T) {
+	c := parseArgs([]string{"--store", "--check"})
+	if c.storeMissingValue != true {
+		t.Errorf("--store --check: storeMissingValue=false; want true (dashed follower is not a value)")
+	}
+	if c.init {
+		t.Errorf("--store --check: init=true; want false (no value consumed → must not imply init)")
+	}
+	if c.initStore != "" {
+		t.Errorf("--store --check: initStore=%q; want empty", c.initStore)
+	}
+	if !c.check {
+		t.Errorf("--store --check: c.check=false; want true (--check must be parsed as its own flag, not swallowed as the store value)")
+	}
+	if len(c.tags) != 0 {
+		t.Errorf("--store --check: tags=%v; want empty", c.tags)
+	}
+}
+
+// parseArgs: `--store --relative` (modifier follower) is still a missing value —
+// `--store` REQUIRES a value (unlike --init, whose dir is optional).
+func TestParseArgsStoreDashedModifierFollowerIsMissingValue(t *testing.T) {
+	c := parseArgs([]string{"--store", "--relative"})
+	if !c.storeMissingValue {
+		t.Errorf("--store --relative: storeMissingValue=false; want true")
+	}
+	if c.init {
+		t.Errorf("--store --relative: init=true; want false")
+	}
+}
+
+// parseArgs: `--link --check` does NOT consume `--check` as the link target.
+// linkMissingValue is set; c.link stays false; --check is parsed as its own flag.
+// (Unlike --store, --link has NO cwd-auto-detect fallback, so an empty target must
+// be a missing value, never a silent link-the-cwd.)
+func TestParseArgsLinkDashedFollowerNotConsumed(t *testing.T) {
+	c := parseArgs([]string{"--link", "--check"})
+	if !c.linkMissingValue {
+		t.Errorf("--link --check: linkMissingValue=false; want true (dashed follower is not a value)")
+	}
+	if c.link {
+		t.Errorf("--link --check: link=true; want false (no value consumed)")
+	}
+	if c.linkTarget != "" {
+		t.Errorf("--link --check: linkTarget=%q; want empty", c.linkTarget)
+	}
+	if !c.check {
+		t.Errorf("--link --check: c.check=false; want true (--check must be parsed as its own flag, not swallowed as the link target)")
+	}
+	if len(c.tags) != 0 {
+		t.Errorf("--link --check: tags=%v; want empty", c.tags)
+	}
+}
+
+// parseArgs: `--link --relative` (modifier follower) is a missing value too —
+// prevents the empty-target runLink path from silently linking the cwd.
+func TestParseArgsLinkDashedModifierFollowerIsMissingValue(t *testing.T) {
+	c := parseArgs([]string{"--link", "--relative"})
+	if !c.linkMissingValue {
+		t.Errorf("--link --relative: linkMissingValue=false; want true")
+	}
+	if c.link {
+		t.Errorf("--link --relative: link=true; want false")
+	}
+}
+
+// run: `--store --check` → exit 2 with the missing-value message, EMPTY stdout,
+// and NO state mutation (no config written, no directory created). This is the
+// core safety fix: the old behavior overwrote the config and mkdir'd a "--check"
+// directory in the cwd.
+func TestRunStoreDashedFollowerExits2NoMutation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	os.Unsetenv("SKILLDOZER_CONFIG")
+	os.Unsetenv("XDG_CONFIG_HOME")
+	os.Unsetenv("XDG_DATA_HOME")
+	// Snapshot cwd contents; nothing should be created here.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	before, err := os.ReadDir(wd)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", "--check"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(--store --check): code=%d; want 2 (missing value)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY", out.String())
+	}
+	if got, want := errOut.String(), "skilldozer: --store requires a value\n"; got != want {
+		t.Errorf("stderr=%q; want %q", got, want)
+	}
+	// No config written under the isolated HOME.
+	cfgPath := filepath.Join(home, ".config", "skilldozer", "config.yaml")
+	if _, err := os.Stat(cfgPath); err == nil {
+		t.Errorf("config was written at %s (must be non-destructive)", cfgPath)
+	}
+	// No stray "--check" directory created in the cwd.
+	after, err := os.ReadDir(wd)
+	if err != nil {
+		t.Fatalf("readdir after: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Errorf("cwd contents changed (--store --check must not create anything): before=%d entries, after=%d", len(before), len(after))
+	}
+}
+
+// run: `--link --check` → exit 2, EMPTY stdout, no state mutation.
+func TestRunLinkDashedFollowerExits2NoMutation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	os.Unsetenv("SKILLDOZER_CONFIG")
+	os.Unsetenv("XDG_CONFIG_HOME")
+	os.Unsetenv("XDG_DATA_HOME")
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--link", "--check"}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("run(--link --check): code=%d; want 2 (missing value)", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY", out.String())
+	}
+	if got, want := errOut.String(), "skilldozer: --link requires a path to a skill directory\n"; got != want {
+		t.Errorf("stderr=%q; want %q", got, want)
+	}
+}
+
+// Regression: the documented valid forms still work after the guard.
+// `--store=<dir>` and `--store <dir>` both imply init and set the store.
+func TestRunStoreValidFormsStillWork(t *testing.T) {
+	for _, args := range [][]string{
+		{"--store=/tmp/sd-valid-eq"},
+		{"--store", "/tmp/sd-valid-sp"},
+	} {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		os.Unsetenv("SKILLDOZER_CONFIG")
+		os.Unsetenv("XDG_CONFIG_HOME")
+		os.Unsetenv("XDG_DATA_HOME")
+		var out, errOut bytes.Buffer
+		code := run(args, &out, &errOut)
+		if code != 0 {
+			t.Errorf("run(%v): code=%d; want 0 (valid --store form)", args, code)
+		}
+	}
 }

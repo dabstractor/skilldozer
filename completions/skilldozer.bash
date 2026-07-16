@@ -79,7 +79,11 @@ complete -F _skilldozer_completion skilldozer
 # `[[ $- == *i* ]] &&` guard keeps this quiet when the file is sourced
 # non-interactively (e.g. an eval test harness): `bind` in a non-interactive shell
 # prints a warning, which the guard silences. Completions only matter interactively,
-# so the option still applies where it counts.
-[[ $- == *i* ]] && bind 'set show-all-if-ambiguous on'
+# so the option still applies where it counts. The trailing `|| true` ensures
+# `source`/`eval` of this file returns exit 0 even in a non-interactive shell, where
+# the `[[ ... ]]` test is false and the `&&` would otherwise short-circuit the whole
+# statement (and thus the source/eval) to exit 1 — which would abort a `.bashrc`
+# running under `set -e` or break `source ... && cmd` one-liners.
+{ [[ $- == *i* ]] && bind 'set show-all-if-ambiguous on'; } || true
 # Opt-out — restore bash's stock (second-Tab) listing:
 #   bind 'set show-all-if-ambiguous off'
