@@ -492,7 +492,7 @@ The **headline behavior** is: a bare `<tab>` shows the user's installed **skills
 Rules:
 
 1. **Positional args are skills, always.** The first and every subsequent positional completes to skill tags from `skilldozer --relative --all`. A bare `<tab>` with nothing typed yields the full skill list. **No caching:** a newly-dropped skill directory is completable on the very next keystroke.
-2. **Prefix filtering is the shell's native job.** The completion functions *offer* the full tag list (or the full flag list) and let the shell narrow it to whatever matches the token being typed — so `skilldozer a<tab>` shows only `a…` skills and `skilldozer --c<tab>` shows only `--c…` flags, with zero special-casing in the script.
+2. **Prefix filtering is the shell's native job.** The completion functions *offer* the full tag list (or the full flag list) and let the shell narrow it to whatever matches the token being typed — so `skilldozer a<tab>` shows only `a…` skills and `skilldozer --c<tab>` shows only `--c…` flags, with zero special-casing in the script. Filtering narrows the set; §14.7 additionally requires the shell to **show** that set (list every prefix match on the first Tab — never a silent halt at the common prefix).
 3. **Flags complete to long form only.** `skilldozer -<tab>` (a single dash) and `skilldozer --<tab>` both offer the `--long` options and **never** the short aliases (`-a`, `-l`, …). Short forms stay valid at runtime (§6.1) for typing; they are simply not advertised by completion, mirroring the long-form-only help menu.
 4. **Skills, not commands, on a bare `<tab>`.** Because the only things without a `-` prefix are skill tags, a bare `<tab>` shows skills — never the help menu, never a command/subcommand list. Commands appear only after the user types `-` (see rule 3).
 5. **Modes own their positionals.** When `--init` is present, its optional `<dir>` completes to directories (like `--store`), not skills; when any other mode flag is present, no positional is expected.
@@ -596,6 +596,30 @@ The three scripts in `completions/` are compiled into the binary with `//go:embe
 
 Because the scripts are baked in at build time, editing `completions/*` requires a **rebuild** for `--completions` to reflect it — whereas the §14.5 manual source/copy path picks up edits immediately. Keep both delivery paths in sync; the §14.4 flag-change rule applies to the embedded bytes too, and §14.1's "skills-first / long-form-only" behavior is part of that same lockstep contract.
 
+### 14.7 Listing behavior — show every match, never a silent halt
+
+A completion that completes the longest common prefix and then **stops with nothing shown** is a defect against this contract. When the token being completed matches **two or more** candidates — skill tags *or* long-form flags — the completion must surface the **full filtered candidate set** as visible hints: every candidate that begins with the typed string, listed so the user can read and choose among them.
+
+Why this matters here specifically: the store is manifest-free (§2), so the user often does **not** know a tag ahead of time — discovery-via-completion is the primary way to find a skill. An ambiguous prefix that hides its candidates defeats that. The same applies to flags: `skilldozer --c<tab>` must show `--check` and `--completions`, not freeze at `--c`.
+
+The requirement has two halves:
+
+1. **Offer every match (skilldozer's job — already true; lock it).** The scripts offer the COMPLETE candidate list — tags via `skilldozer --relative --all`, flags via the frozen long-form set — and let the shell prefix-filter (§14.1 rule 2). The candidate set reaching the shell is always complete; skilldozer never filters matches out.
+2. **Make the shell SHOW them on the first Tab (the fix this section adds).** Surfacing that set on the *first* Tab is governed by per-shell "list ambiguous matches" options — and on two of the three shells the default **is** the silent halt:
+   - **zsh:** `LIST_AMBIGUOUS` is **on by default**, so the first Tab completes the common prefix and lists only once you have typed to the exact ambiguous point (`ag`→`agent-b`, nothing shown). `setopt NO_LIST_AMBIGUOUS` (with the default `AUTO_LIST`) makes the first Tab list **all** prefix matches immediately (verified empirically: it flips `ag<tab>` from no-list to showing both `agent-browser` and `agent-builder`). There is **no per-command scope** for this — a scoped `zstyle ':completion:*:*:_skilldozer:*' menu select` does **not** produce first-Tab listing (verified); it is a session-global option.
+   - **bash:** `show-all-if-ambiguous` is **off by default** → first Tab completes the common prefix and beeps; the list appears only on the second Tab. `bind 'set show-all-if-ambiguous on'` lists all matches on the first Tab. This is a readline (session-global) setting; a completion function cannot set it, but the emitted `--completions` script can `bind` it.
+   - **fish:** lists all matches in the pager by default. No action needed.
+
+Because the zsh/bash options are **session-global** (they change listing for *every* command, not just skilldozer), enabling them is a coupling the user must be able to see and undo. The emitted `--completions` scripts therefore:
+
+- set the option so skilldozer (and, yes, the rest of the shell) lists ambiguous matches on the first Tab — the "just works" default the user asked for;
+- **disclose** the change in the emitted script's comments and in the README (§15), naming the exact option set;
+- provide the one-line **opt-out** (`setopt LIST_AMBIGUOUS` for zsh, `bind 'set show-all-if-ambiguous off'` for bash), so a user who prefers the shell's stock behavior can restore it after `eval`.
+
+The guaranteed-always-true part is #1 (the complete filtered set is always offered); #2 is the disclosed, opt-out-able enhancement that makes that set visible on the first Tab.
+
+This complements §14.1 rule 2 ("prefix filtering is the shell's native job"): the shell filters **and lists** — the candidate set is always complete and (with the option) always visible.
+
 ---
 
 ## 15. README.md outline
@@ -680,3 +704,4 @@ Mirror the mcpeepants README's tone and structure:
 | 19 | Subcommand → flag (namespace safety) | **No bare-word subcommands.** `check`/`init`/`completion` are now `--check`/`--init`/`--completions`; `completion` also renamed to the plural `--completions` | The bare positional namespace is reserved entirely for skill tags, so a skill named `check`/`init`/`completions` is never shadowed and a bare `<tab>` unambiguously means "skills" (§6.1, §14). Previously handled by "reserved subcommand shadows the tag," which was itself the namespace conflict. |
 | 20 | Completions behavior | **Skills-first & long-form-only:** bare `<tab>` lists skills; `skilldozer -<tab>` lists `--long` flags (never short aliases); prefix filtering is the shell's native job | `<tab>` = skills is the headline UX the user asked for. Driving everything to `--flags` (decision 19) makes it trivially correct. Long-form-only matches the `--help` surface and keeps the menu short. |
 | 21 | `--link` (external skill linking) | **`skilldozer --link <dir>`** creates a symlink `<store>/<basename>` → absolutized `<dir>`; refreshes an existing symlink (install.sh precedent), refuses a non-symlink (never clobber); validates the target is a dir with ≥1 `SKILL.md`, not the store itself/inside it; `<dir>` is a flag value (not a positional); stdout = link path, exit `0`/`1`, exit `2` on missing value | The `npm link`/`pip install -e` idiom for skills — develop elsewhere, link into the store, discover via §7.1's symlink-following (no new discovery code). Avoids copying, giving a single source of truth for in-development skills. |
+| 22 | Completion listing (ambiguous matches) | **First-Tab list-all-matches; never a silent halt at the common prefix.** skilldozer always offers the complete prefix-filtered candidate set (tags + flags); the emitted `--completions` script additionally sets the shell's list-ambiguous-matches option (zsh `NO_LIST_AMBIGUOUS`, bash `show-all-if-ambiguous on`, fish default) so matches are shown on the first Tab — disclosed + opt-out-able, since these are session-global options. | A manifest-free store makes completion the primary discovery path, so hidden candidates are a UX defect. No per-command scope exists on zsh/bash (verified: a scoped `menu select` zstyle does **not** list on the first Tab; only the global `NO_LIST_AMBIGUOUS` does), so the option must be set globally — but disclosed and reversible to respect shell sovereignty. |
