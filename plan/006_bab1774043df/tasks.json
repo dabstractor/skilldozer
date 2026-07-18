@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "--link Multi-Target Batch Linking",
-      "status": "Planned",
+      "status": "Researching",
       "description": "Extend skilldozer's --link flag from single-target (--link <dir>) to multi-target batch (--link <dir> [<dir>...]). The PRD was updated (commit 983672e) to specify batch linking per §8.4, §6.1, §6.3, §6.4, and decisions 21+23, but no implementation code was changed — the current binary exits 2 with \"'--link' cannot be combined with tag arguments\" when given multiple directories. This phase implements the batch behavior in Go (parser, exclusivity, execution), updates shell completions for multi-position directory completion, and syncs documentation. All other features (skillsdir, discover, resolve, search, check, config, ui, install.sh, --init, --completions, etc.) are fully implemented and unaffected — discovery already follows symlinks (§7.1), so a linked skill resolves by its link name with no new discovery code.",
       "milestones": [
         {
@@ -48,21 +48,21 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Shell Completions for Multi-Link Directory Completion",
-          "status": "Researching",
+          "status": "Ready",
           "description": "Update the bash, zsh, and fish completion scripts so that after --link appears anywhere in the command line, every subsequent positional position completes to directories (not skill tags). This implements PRD §14.1 rule 5 and the `--link d1 <tab>` behavior matrix row.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "Update all three completion scripts for multi-link directory completion",
-              "status": "Researching",
+              "status": "Ready",
               "description": "Currently completions only offer directories when the immediately preceding token is --link. After --link d1, the prev arg is d1 (not --link), so tags are offered instead of directories. Update all three scripts to detect --link anywhere in the command line and switch to directory completion at every subsequent position.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T1.S1",
                   "title": "Multi-position directory completion after --link (bash, zsh, fish)",
-                  "status": "Researching",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1"
@@ -85,21 +85,21 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Documentation Sync & Acceptance Verification",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Final Mode B documentation sweep: verify the full §13 acceptance suite passes (including the new multi-link and mixed-batch test cases), sweep README.md for any remaining single-target --link wording in overview/cross-cutting sections, and ensure the changeset is coherent end-to-end.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "Sync changeset-level documentation",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Cross-cutting documentation sweep that only makes sense once the whole changeset is in place. Verifies §13 acceptance, updates README overview sections that reference --link, and ensures no stale single-target wording remains in cross-cutting mentions (mode-flags list, completions section, quick-start).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "Sweep README overview + verify §13 acceptance",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",
