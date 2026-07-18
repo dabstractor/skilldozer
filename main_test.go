@@ -3486,15 +3486,18 @@ func mkExtSkill(t *testing.T, name string) string {
 	return dir
 }
 
-// parseArgs: `--link <dir>` (next-token form) sets link + linkTarget, leaves tags
+// parseArgs: `--link <dir>` (next-token form) sets link + linkTargets[0], leaves tags
 // empty (the dir is a flag VALUE, not a positional — §6.3 namespace safety).
 func TestParseArgsLinkNextToken(t *testing.T) {
 	c := parseArgs([]string{"--link", "/path/to/skill"})
 	if !c.link {
 		t.Errorf("c.link=false; want true")
 	}
-	if c.linkTarget != "/path/to/skill" {
-		t.Errorf("c.linkTarget=%q; want %q", c.linkTarget, "/path/to/skill")
+	if len(c.linkTargets) != 1 || c.linkTargets[0] != "/path/to/skill" {
+		t.Errorf("c.linkTargets=%v; want [/path/to/skill]", c.linkTargets)
+	}
+	if !c.collectingLink {
+		t.Errorf("c.collectingLink=false; want true (value consumed → batch collector armed)")
 	}
 	if c.linkMissingValue {
 		t.Errorf("c.linkMissingValue=true; want false")
@@ -3504,14 +3507,17 @@ func TestParseArgsLinkNextToken(t *testing.T) {
 	}
 }
 
-// parseArgs: `--link=<dir>` ('='-form) sets link + linkTarget.
+// parseArgs: `--link=<dir>` ('='-form) sets link + linkTargets[0].
 func TestParseArgsLinkEquals(t *testing.T) {
 	c := parseArgs([]string{"--link=/path/to/skill"})
 	if !c.link {
 		t.Errorf("c.link=false; want true")
 	}
-	if c.linkTarget != "/path/to/skill" {
-		t.Errorf("c.linkTarget=%q; want %q", c.linkTarget, "/path/to/skill")
+	if len(c.linkTargets) != 1 || c.linkTargets[0] != "/path/to/skill" {
+		t.Errorf("c.linkTargets=%v; want [/path/to/skill]", c.linkTargets)
+	}
+	if !c.collectingLink {
+		t.Errorf("c.collectingLink=false; want true")
 	}
 	if c.linkMissingValue {
 		t.Errorf("c.linkMissingValue=true; want false")
@@ -3531,21 +3537,23 @@ func TestParseArgsLinkNoValue(t *testing.T) {
 }
 
 // parseArgs: `--link=` (empty '='-form) records linkMissingValue (a link with no
-// target is meaningless — mirrors --store=, Issue 2).
+// target is meaningless — mirrors --store=, Issue 2). c.link stays true (=-form always
+// sets it) but no target is appended.
 func TestParseArgsLinkEqualsEmpty(t *testing.T) {
 	c := parseArgs([]string{"--link="})
 	if !c.link {
 		t.Errorf("c.link=false; want true")
 	}
-	if c.linkTarget != "" {
-		t.Errorf("c.linkTarget=%q; want empty", c.linkTarget)
+	if len(c.linkTargets) != 0 {
+		t.Errorf("c.linkTargets=%v; want empty", c.linkTargets)
 	}
 	if !c.linkMissingValue {
 		t.Errorf("c.linkMissingValue=false; want true")
 	}
 }
 
-// run: `--link` (no value) → exit 2, empty stdout, exact stderr.
+// run: `--link` (no value) → exit 2, empty stdout, exact stderr (batch wording: §8.4
+// requires AT LEAST one path — the first unlocks the collectingLink batch collector).
 func TestRunLinkNoValueExits2(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run([]string{"--link"}, &out, &errOut)
@@ -3555,7 +3563,7 @@ func TestRunLinkNoValueExits2(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("stdout=%q; want EMPTY", out.String())
 	}
-	if got, want := errOut.String(), "skilldozer: --link requires a path to a skill directory\n"; got != want {
+	if got, want := errOut.String(), "skilldozer: --link requires at least one path to a skill directory\n"; got != want {
 		t.Errorf("stderr=%q; want %q", got, want)
 	}
 }
@@ -3572,12 +3580,15 @@ func TestRunLinkEqualsEmptyExits2(t *testing.T) {
 	}
 }
 
-// run: `--link <dir> <tag>` → exit 2 (--link is an exclusive mode; tags forbidden).
-func TestRunLinkWithTagsExits2(t *testing.T) {
+// run: `--link <dir> <tag>` → exit 1: with batch linking (§8.4), the trailing positional is
+// NO LONGER a tag (collectingLink routes it to linkTargets), so both tokens are link targets.
+// Neither is a valid skill dir here, so both fail validation and the batch exits 1 (partial-
+// success semantics: zero successes, two failures). stdout is empty (no link created).
+func TestRunLinkTrailingPositionalBecomesTargetExits1(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run([]string{"--link", "/tmp/foo", "sometag"}, &out, &errOut)
-	if code != 2 {
-		t.Fatalf("run(--link /tmp/foo sometag): code=%d; want 2 (tags + link mode)", code)
+	if code != 1 {
+		t.Fatalf("run(--link /tmp/foo sometag): code=%d; want 1 (both targets fail validation)", code)
 	}
 	if out.Len() != 0 {
 		t.Errorf("stdout=%q; want EMPTY", out.String())
@@ -3873,8 +3884,8 @@ func TestParseArgsLinkDashedFollowerNotConsumed(t *testing.T) {
 	if c.link {
 		t.Errorf("--link --check: link=true; want false (no value consumed)")
 	}
-	if c.linkTarget != "" {
-		t.Errorf("--link --check: linkTarget=%q; want empty", c.linkTarget)
+	if len(c.linkTargets) != 0 {
+		t.Errorf("--link --check: linkTargets=%v; want empty", c.linkTargets)
 	}
 	if !c.check {
 		t.Errorf("--link --check: c.check=false; want true (--check must be parsed as its own flag, not swallowed as the link target)")
@@ -3958,7 +3969,7 @@ func TestRunLinkDashedFollowerExits2NoMutation(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("stdout=%q; want EMPTY", out.String())
 	}
-	if got, want := errOut.String(), "skilldozer: --link requires a path to a skill directory\n"; got != want {
+	if got, want := errOut.String(), "skilldozer: --link requires at least one path to a skill directory\n"; got != want {
 		t.Errorf("stderr=%q; want %q", got, want)
 	}
 }
@@ -3980,5 +3991,173 @@ func TestRunStoreValidFormsStillWork(t *testing.T) {
 		if code != 0 {
 			t.Errorf("run(%v): code=%d; want 0 (valid --store form)", args, code)
 		}
+	}
+}
+
+// --- P1.M1.T1.S1: batch linking (--link <dir> [<dir>...], PRD §8.4) ---
+//
+// --link is now a BATCH COLLECTOR (Decision 21/§19): once it consumes its first value,
+// every later positional routes to linkTargets (never tags). runLink loops them in input
+// order with PARTIAL SUCCESS (valid links persist if others fail). Exit 0 all / 1 any / 2
+// no-dirs. stdout = one link path per SUCCESS, in input order; mixed stdout/stderr allowed.
+
+// parseArgs: `--link a b c` collects ALL three into linkTargets (collectingLink armed),
+// leaving tags empty — the bare-positional namespace stays reserved for tags when --link
+// is absent, but once --link consumes a value, trailing positionals ARE link dirs.
+func TestParseArgsLinkCollectsMultiple(t *testing.T) {
+	c := parseArgs([]string{"--link", "/a", "/b", "/c"})
+	if !c.link {
+		t.Errorf("c.link=false; want true")
+	}
+	if !c.collectingLink {
+		t.Errorf("c.collectingLink=false; want true (value consumed → batch collector armed)")
+	}
+	want := []string{"/a", "/b", "/c"}
+	if len(c.linkTargets) != len(want) {
+		t.Fatalf("c.linkTargets=%v; want %v", c.linkTargets, want)
+	}
+	for i, w := range want {
+		if c.linkTargets[i] != w {
+			t.Errorf("c.linkTargets[%d]=%q; want %q", i, c.linkTargets[i], w)
+		}
+	}
+	if len(c.tags) != 0 {
+		t.Errorf("c.tags=%v; want empty (trailing positionals are link targets, not tags)", c.tags)
+	}
+	if c.linkMissingValue {
+		t.Errorf("c.linkMissingValue=true; want false (a value was consumed)")
+	}
+}
+
+// parseArgs: `--link=a b` — the =-form first value PLUS the trailing positional both land
+// in linkTargets (collectingLink is armed by the =-form too). Order = [a, b].
+func TestParseArgsLinkEqualsPlusPositionals(t *testing.T) {
+	c := parseArgs([]string{"--link=/a", "/b"})
+	if !c.link {
+		t.Errorf("c.link=false; want true")
+	}
+	if !c.collectingLink {
+		t.Errorf("c.collectingLink=false; want true")
+	}
+	want := []string{"/a", "/b"}
+	if len(c.linkTargets) != len(want) {
+		t.Fatalf("c.linkTargets=%v; want %v", c.linkTargets, want)
+	}
+	for i, w := range want {
+		if c.linkTargets[i] != w {
+			t.Errorf("c.linkTargets[%d]=%q; want %q", i, c.linkTargets[i], w)
+		}
+	}
+	if len(c.tags) != 0 {
+		t.Errorf("c.tags=%v; want empty", c.tags)
+	}
+}
+
+// runLink batch success: `--link a b` links BOTH, exit 0, stdout = both link paths in
+// input order (one per line), and each symlink is created pointing at its target.
+func TestRunLinkMultiSuccess(t *testing.T) {
+	store := t.TempDir()
+	t.Setenv("SKILLDOZER_SKILLS_DIR", store)
+	a := mkExtSkill(t, "alpha")
+	b := mkExtSkill(t, "beta")
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--link", a, b}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--link a b): code=%d; want 0 (both valid)", code)
+	}
+	wantOut := filepath.Join(store, "alpha") + "\n" + filepath.Join(store, "beta") + "\n"
+	if got := out.String(); got != wantOut {
+		t.Errorf("stdout=%q; want %q (one link path per success, input order)", got, wantOut)
+	}
+	// Both symlinks exist and point at their targets.
+	for _, c := range []struct{ name, target string }{{"alpha", a}, {"beta", b}} {
+		lp := filepath.Join(store, c.name)
+		if target, err := os.Readlink(lp); err != nil || target != c.target {
+			t.Errorf("Readlink(%s)=%q err=%v; want %q", lp, target, err, c.target)
+		}
+	}
+	_ = errOut
+}
+
+// runLink batch order preservation: stdout paths appear in INPUT order, not sorted and
+// not link-creation order. Three dirs named so alphabetical ≠ input order.
+func TestRunLinkOrderPreservation(t *testing.T) {
+	store := t.TempDir()
+	t.Setenv("SKILLDOZER_SKILLS_DIR", store)
+	// Names chosen so input order (zeta, alpha, mid) != sorted order.
+	zeta := mkExtSkill(t, "zeta")
+	alpha := mkExtSkill(t, "alpha")
+	mid := mkExtSkill(t, "mid")
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--link", zeta, alpha, mid}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("run(--link zeta alpha mid): code=%d; want 0", code)
+	}
+	wantOut := filepath.Join(store, "zeta") + "\n" +
+		filepath.Join(store, "alpha") + "\n" +
+		filepath.Join(store, "mid") + "\n"
+	if got := out.String(); got != wantOut {
+		t.Errorf("stdout=%q; want %q (input order preserved)", got, wantOut)
+	}
+	_ = errOut
+}
+
+// runLink mixed batch: `--link a invalid b` — the two valid dirs link (stdout gets both
+// paths, in order), the invalid one is reported on stderr, and the batch exits 1 (partial
+// success). The valid links PERSIST (invalid does not abort the loop).
+func TestRunLinkMixedBatch(t *testing.T) {
+	store := t.TempDir()
+	t.Setenv("SKILLDOZER_SKILLS_DIR", store)
+	a := mkExtSkill(t, "alpha")
+	invalid := filepath.Join(t.TempDir(), "noskill") // a dir with NO SKILL.md
+	if err := os.MkdirAll(invalid, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	b := mkExtSkill(t, "beta")
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--link", a, invalid, b}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(--link a invalid b): code=%d; want 1 (one target failed)", code)
+	}
+	// stdout has the TWO successful link paths, in input order (alpha, beta).
+	wantOut := filepath.Join(store, "alpha") + "\n" + filepath.Join(store, "beta") + "\n"
+	if got := out.String(); got != wantOut {
+		t.Errorf("stdout=%q; want %q (valid links persist; invalid omitted)", got, wantOut)
+	}
+	// stderr names the invalid target (no SKILL.md). Message uses the original token's abs path.
+	if !strings.Contains(errOut.String(), "no SKILL.md") || !strings.Contains(errOut.String(), "noskill") {
+		t.Errorf("stderr=%q; want a 'no SKILL.md' message naming the invalid dir", errOut.String())
+	}
+	// Both valid symlinks were actually created.
+	for _, n := range []string{"alpha", "beta"} {
+		if _, err := os.Readlink(filepath.Join(store, n)); err != nil {
+			t.Errorf("symlink %s not created (partial success must persist valid links): %v", n, err)
+		}
+	}
+}
+
+// runLink single bad dir: the only target is invalid → nothing on stdout, exit 1, one
+// stderr line. (The batch loop runs once and fails; hadErr → exit 1.)
+func TestRunLinkSingleBadDir(t *testing.T) {
+	store := t.TempDir()
+	t.Setenv("SKILLDOZER_SKILLS_DIR", store)
+	empty := filepath.Join(t.TempDir(), "noskill")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--link", empty}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("run(--link bad): code=%d; want 1", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout=%q; want EMPTY (no success)", out.String())
+	}
+	if !strings.Contains(errOut.String(), "no SKILL.md") {
+		t.Errorf("stderr=%q; want a 'no SKILL.md' message", errOut.String())
 	}
 }

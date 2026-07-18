@@ -124,8 +124,9 @@ skilldozer --all
 # Validate every skill on disk
 skilldozer --check
 
-# Link an external skill directory into the store (no copy; npm-link style, §8.4)
+# Link one or more external skill directories into the store (no copy; npm-link style, §8.4)
 skilldozer --link ~/projects/agent-browser   # creates <store>/agent-browser -> that dir
+skilldozer --link ~/projects/a ~/projects/b  # batch-link several at once (partial success)
 
 # Where is the resolved skills directory? (its discovery rule prints to stderr)
 skilldozer --path                        # → /…/skills (stderr: found via sibling of binary)
@@ -157,20 +158,33 @@ last token with nothing after them, rather than guessing a value.
 
 ### Linking skills from elsewhere (`--link`)
 
-`skilldozer --link <dir>` makes a skill directory that lives **outside** the
-store available in it, **without copying** — the `npm link` / `pip install -e`
-idiom for skills. You point it at any directory containing a `SKILL.md` (or a
-directory of skills), and it creates a symlink `<store>/<basename>` → that
-directory. Discovery already follows symlinks, so the linked skill resolves by
-its name exactly like a real one:
+`skilldozer --link <dir> [<dir>...]` makes one or more skill directories that live
+**outside** the store available in it, **without copying** — the `npm link` /
+`pip install -e` idiom for skills. Pass `--link` once; every positional after it is a
+directory to link. You point it at any directory containing a `SKILL.md` (or a directory
+of skills), and it creates a symlink `<store>/<basename>` → that directory for each one.
+Discovery already follows symlinks, so the linked skill resolves by its name exactly like
+a real one:
 
 ```bash
 skilldozer --link ~/projects/agent-browser
 skilldozer agent-browser          # now resolves (via the symlink)
 pi --skill "$(skilldozer agent-browser)"
+
+# Batch-link several at once (the PRD §8.4 headline behavior):
+skilldozer --link ~/projects/agent-browser ~/projects/mdsel ~/projects/agent-builder
 ```
 
-`~` is expanded and the target is absolutized, so the link stays valid from any
+The batch runs with **partial success**: each directory is validated and linked
+independently in input order, so a single bad directory does not block the rest. Every
+successful link prints its path to **stdout** (one per line, in input order); each
+failure prints a message to **stderr** naming the offending directory. Exit codes:
+
+- **`0`** — every directory linked
+- **`1`** — at least one failed (the successful links remain in place)
+- **`2`** — no directory followed `--link` (e.g. `skilldozer --link` or `--link --check`)
+
+`~` is expanded and each target is absolutized, so the links stay valid from any
 working directory. Re-running `--link` on the same name **refreshes** an existing
 symlink (re-points it); it **refuses** to overwrite a real file or directory at
 that name (remove it yourself first). It also refuses a target that isn't a
